@@ -88,15 +88,19 @@ impl MyAnimeListModule {
     }
 
     /// Queue a task to update an existing anime
-    pub async fn queue_update_anime(&self, anime_id: u32) -> Result<(), AppError> {
+    pub async fn queue_update_anime(&self, anime_id: u32, with_jikan: bool) -> Result<(), AppError> {
         let api_key = self.config.get_api_key("my_anime_list")
             .expect("API key should be validated during module creation");
 
-        let task = UpdateAnimeTask::new(
+        let mut task = UpdateAnimeTask::new(
             anime_id,
             api_key,
             self.client.clone(),
         );
+
+        if with_jikan {
+            task = task.with_jikan();
+        }
 
         info!(
             module = "my_anime_list",
