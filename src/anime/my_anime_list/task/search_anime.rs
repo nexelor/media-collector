@@ -82,7 +82,7 @@ impl Task for SearchAnimeTask {
         );
 
         let url = format!(
-            "https://api.myanimelist.net/v2/anime?q={}&limit={}",
+            "https://api.myanimelist.net/v2/anime?q={}&limit={}&fields=id,title,main_picture,alternative_titles,start_date,end_date,synopsis,mean,rank,popularity,num_list_users,num_scoring_users,nsfw,genres,created_at,updated_at,media_type,status,num_episodes,start_season,broadcast,source,average_episode_duration,rating,studios,pictures,background,related_anime,related_manga,statistics",
             urlencoding::encode(&self.query),
             self.limit
         );
@@ -96,7 +96,7 @@ impl Task for SearchAnimeTask {
 
         #[derive(Deserialize)]
         struct SearchResult {
-            node: crate::anime::my_anime_list::model::AnimeData,
+            node: crate::anime::my_anime_list::model::MalAnimeResponse,
         }
 
         let response = self.client_with_limiter
@@ -110,9 +110,13 @@ impl Task for SearchAnimeTask {
             "Search completed"
         );
 
-        // Store results in database
+        // Convert and store results in database (anime_mal collection)
         for result in response.data {
-            crate::anime::my_anime_list::database::insert_anime(db.db(), &result.node).await?;
+            let anime_data = crate::anime::my_anime_list::converter::mal_to_anime_data(
+                result.node,
+                None
+            );
+            crate::anime::my_anime_list::database::insert_anime(db.db(), &anime_data).await?;
         }
 
         Ok(())

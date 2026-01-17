@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::global::{
     database::DatabaseInstance,
@@ -19,6 +19,8 @@ pub struct BatchFetchTask {
     api_key: String,
     client_with_limiter: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
+    /// Whether to also fetch Jikan data for enrichment
+    fetch_jikan: bool,
 }
 
 impl BatchFetchTask {
@@ -34,7 +36,14 @@ impl BatchFetchTask {
             api_key,
             client_with_limiter,
             created_at: chrono::Utc::now(),
+            fetch_jikan: false,
         }
+    }
+
+    /// Create a batch fetch task that also fetches Jikan data for enrichment
+    pub fn with_jikan(mut self) -> Self {
+        self.fetch_jikan = true;
+        self
     }
 }
 
@@ -71,6 +80,7 @@ impl Task for BatchFetchTask {
         info!(
             task = %self.name(),
             count = self.anime_ids.len(),
+            fetch_jikan = self.fetch_jikan,
             "Batch fetching anime from MyAnimeList"
         );
 
@@ -79,18 +89,40 @@ impl Task for BatchFetchTask {
 
         for anime_id in &self.anime_ids {
             // Create individual fetch task
-            let fetch_task = super::fetch_anime::FetchAnimeTask::new(
+            let mut fetch_task = super::fetch_anime::FetchAnimeTask::new(
                 *anime_id,
                 self.api_key.clone(),
                 self.client_with_limiter.clone(),
             );
 
+            if self.fetch_jikan {
+                fetch_task = fetch_task.with_jikan();
+            }
+
             match fetch_task.execute(db.clone(), _client.clone()).await {
-                Ok(_) => successful += 1,
+                Ok(_) => {
+                    successful += 1;
+                    info!(
+                        task = %self.name(),
+                        anime_id = anime_id,
+                        progress = format!("{}/{}", successful + failed, self.anime_ids.len()),
+                        "Anime fetched successfully"
+                    );
+                }
                 Err(e) => {
-                    tracing::warn!(anime_id = anime_id, error = %e, "Failed to fetch anime in batch");
+                    warn!(
+                        task = %self.name(),
+                        anime_id = anime_id,
+                        error = %e,
+                        "Failed to fetch anime in batch"
+                    );
                     failed += 1;
                 }
+            }
+
+            // Small delay between fetches to be nice to the API
+            if self.anime_ids.len() > 1 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         }
 

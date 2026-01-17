@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use tracing::{info, debug};
+use serde::{Deserialize, Serialize};
+use tracing::{info, debug, warn};
 
 use crate::global::queue::{TaskData, TaskPriority, TaskStatus};
 use crate::global::{
@@ -8,7 +9,17 @@ use crate::global::{
     queue::Task,
     http::RequestConfig,
 };
-use crate::anime::my_anime_list::{model::AnimeData, database::insert_anime};
+use crate::anime::my_anime_list::{
+    model::{AnimeData, MalAnimeResponse, JikanAnimeResponse},
+    database::upsert_anime,
+    converter::{mal_to_anime_data, merge_jikan_data},
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchAnimePayload {
+    pub anime_id: u32,
+    pub with_jikan: bool,
+}
 
 /// Task to fetch anime data from MyAnimeList API
 pub struct FetchAnimeTask {
@@ -17,6 +28,8 @@ pub struct FetchAnimeTask {
     api_key: String,
     client_with_limiter: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
+    /// Whether to also fetch Jikan data for enrichment
+    with_jikan: bool,
 }
 
 impl FetchAnimeTask {
@@ -32,7 +45,14 @@ impl FetchAnimeTask {
             api_key,
             client_with_limiter,
             created_at: chrono::Utc::now(),
+            with_jikan: false,
         }
+    }
+
+    /// Create a fetch task that also fetches Jikan data for enrichment
+    pub fn with_jikan(mut self) -> Self {
+        self.with_jikan = true;
+        self
     }
 }
 
@@ -51,13 +71,18 @@ impl Task for FetchAnimeTask {
     }
 
     fn to_data(&self) -> TaskData {
+        let payload = FetchAnimePayload {
+            anime_id:self.anime_id,
+            with_jikan: self.with_jikan,
+        };
+
         TaskData {
             id: self.id(),
             name: self.name().to_string(),
             priority: self.priority(),
             status: TaskStatus::Pending,
             created_at: self.created_at,
-            payload: serde_json::json!({ "anime_id": self.anime_id }),
+            payload: serde_json::json!(payload),
         }
     }
 
@@ -65,34 +90,93 @@ impl Task for FetchAnimeTask {
         info!(
             task = %self.name(),
             anime_id = self.anime_id,
+            fetch_jikan = self.with_jikan,
             "Fetching anime from MyAnimeList API"
         );
 
-        let url = format!(
+        // Step 1: Fetch from MyAnimeList API
+        let mal_url = format!(
             "https://api.myanimelist.net/v2/anime/{}?fields=id,title,main_picture,alternative_titles,start_date,end_date,synopsis,mean,rank,popularity,num_list_users,num_scoring_users,nsfw,genres,created_at,updated_at,media_type,status,num_episodes,start_season,broadcast,source,average_episode_duration,rating,studios,pictures,background,related_anime,related_manga,statistics",
             self.anime_id
         );
 
         let config = RequestConfig::new().with_header("X-MAL-CLIENT-ID", &self.api_key);
 
-        // Use the client with rate limiter
-        let anime = self.client_with_limiter
-            .fetch_json::<AnimeData>(&url, Some(config))
+        debug!(task = %self.name(), url = %mal_url, "Fetching from MAL API");
+        let mal_response = self.client_with_limiter
+            .fetch_json::<MalAnimeResponse>(&mal_url, Some(config))
             .await?;
 
         info!(
             task = %self.name(),
-            anime_id = anime.id,
-            title = %anime.title,
-            score = ?anime.score,
-            "Successfully fetched anime"
+            anime_id = mal_response.id,
+            title = %mal_response.title,
+            "Successfully fetched from MAL API"
         );
 
-        // Store in database
-        debug!(task = %self.name(), anime_id = anime.id, "Storing anime in database");
-        insert_anime(db.db(), &anime).await?;
-        debug!(task = %self.name(), anime_id = anime.id, "Anime stored successfully");
+        // Convert MAL response to unified AnimeData
+        let mut anime_data = mal_to_anime_data(
+            mal_response, 
+            Some(format!("https://myanimelist.net/anime/{}", self.anime_id))
+        );
+
+        // Step 2: Optionally fetch from Jikan API for enrichment
+        if self.with_jikan {
+            match self.fetch_jikan_data(self.anime_id).await {
+                Ok(jikan_response) => {
+                    info!(
+                        task = %self.name(),
+                        anime_id = self.anime_id,
+                        "Successfully fetched Jikan data, merging..."
+                    );
+                    anime_data = merge_jikan_data(anime_data, jikan_response.data);
+                }
+                Err(e) => {
+                    warn!(
+                        task = %self.name(),
+                        anime_id = self.anime_id,
+                        error = %e,
+                        "Failed to fetch Jikan data, continuing with MAL data only"
+                    );
+                }
+            }
+        }
+
+        // Step 3: Store in database
+        debug!(task = %self.name(), anime_id = anime_data.mal_id, "Storing anime in database");
+        upsert_anime(db.db(), &anime_data).await?;
+        
+        info!(
+            task = %self.name(),
+            anime_id = anime_data.mal_id,
+            title = %anime_data.titles.first().map(|t| t.title.as_str()).unwrap_or("Unknown"),
+            "Anime stored successfully"
+        );
 
         Ok(())
+    }
+}
+
+impl FetchAnimeTask {
+    /// Fetch anime data from Jikan API (no authentication required)
+    async fn fetch_jikan_data(&self, mal_id: u32) -> Result<JikanAnimeResponse, AppError> {
+        let jikan_url = format!("https://api.jikan.moe/v4/anime/{}/full", mal_id);
+        
+        debug!(
+            task = %self.name(),
+            url = %jikan_url,
+            "Fetching from Jikan API"
+        );
+
+        // Jikan has a rate limit of 3 requests/second, 60 requests/minute
+        // We'll use a simple delay to respect this
+        tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
+
+        // Use default HTTP client (no auth needed for Jikan)
+        let response = self.client_with_limiter
+            .fetch_json::<JikanAnimeResponse>(&jikan_url, None)
+            .await?;
+
+        Ok(response)
     }
 }

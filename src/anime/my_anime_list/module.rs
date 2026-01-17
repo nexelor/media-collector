@@ -4,6 +4,7 @@ use std::future::Future;
 use tracing::{info, warn};
 
 use super::model::AnimeData;
+use crate::anime::my_anime_list::task::{BatchFetchTask, FetchCharactersTask, FetchEpisodesTask, FetchStaffTask, SearchAnimeTask, UpdateAnimeTask};
 use crate::anime::my_anime_list::task::fetch_anime::FetchAnimeTask;
 use crate::global::config::AppConfig;
 use crate::global::database::DatabaseInstance;
@@ -41,19 +42,24 @@ impl MyAnimeListModule {
     }
 
     /// Queue a task to fetch anime by ID
-    pub async fn queue_fetch_anime(&self, anime_id: u32) -> Result<(), AppError> {
+    pub async fn queue_fetch_anime(&self, anime_id: u32, with_jikan: bool) -> Result<(), AppError> {
         let api_key = self.config.get_api_key("my_anime_list")
             .expect("API key should be validated during module creation");
 
-        let task = FetchAnimeTask::new(
+        let mut task = FetchAnimeTask::new(
             anime_id,
             api_key,
             self.client.clone(),
         );
 
+        if with_jikan {
+            task = task.with_jikan();
+        }
+
         info!(
             module = "my_anime_list",
             anime_id = anime_id,
+            with_jikan = with_jikan,
             "Queueing fetch anime task"
         );
 
@@ -65,7 +71,7 @@ impl MyAnimeListModule {
         let api_key = self.config.get_api_key("my_anime_list")
             .expect("API key should be validated during module creation");
 
-        let task = super::task::search_anime::SearchAnimeTask::new(
+        let task = SearchAnimeTask::new(
             query.clone(),
             limit,
             api_key,
@@ -86,7 +92,7 @@ impl MyAnimeListModule {
         let api_key = self.config.get_api_key("my_anime_list")
             .expect("API key should be validated during module creation");
 
-        let task = super::task::update_anime::UpdateAnimeTask::new(
+        let task = UpdateAnimeTask::new(
             anime_id,
             api_key,
             self.client.clone(),
@@ -102,29 +108,117 @@ impl MyAnimeListModule {
     }
 
     /// Queue a batch fetch task
-    pub async fn queue_batch_fetch(&self, anime_ids: Vec<u32>) -> Result<(), AppError> {
+    pub async fn queue_batch_fetch(&self, anime_ids: Vec<u32>, with_jikan: bool) -> Result<(), AppError> {
         let api_key = self.config.get_api_key("my_anime_list")
             .expect("API key should be validated during module creation");
 
-        let task = super::task::batch_fetch::BatchFetchTask::new(
+        let mut task = BatchFetchTask::new(
             anime_ids.clone(),
             api_key,
             self.client.clone(),
         );
 
+        if with_jikan {
+            task = task.with_jikan();
+        }
+
         info!(
             module = "my_anime_list",
             count = anime_ids.len(),
+            with_jikan = with_jikan,
             "Queueing batch fetch task"
         );
 
         self.queue.enqueue(Box::new(task)).await
     }
+
+    /// Queue a task to fetch characters for an anime
+    pub async fn queue_fetch_characters(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchCharactersTask::new(
+            anime_id,
+            self.client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch characters task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue a task to fetch staff for an anime
+    pub async fn queue_fetch_staff(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchStaffTask::new(
+            anime_id,
+            self.client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch staff task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue a task to fetch episodes for an anime
+    pub async fn queue_fetch_episodes(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchEpisodesTask::new(
+            anime_id,
+            self.client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch episodes task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue all extended data tasks for an anime (characters, staff, episodes)
+    pub async fn queue_fetch_all_extended_data(&self, anime_id: u32) -> Result<(), AppError> {
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing all extended data tasks"
+        );
+
+        self.queue_fetch_characters(anime_id).await?;
+        self.queue_fetch_staff(anime_id).await?;
+        self.queue_fetch_episodes(anime_id).await?;
+
+        Ok(())
+    }
+
+    /// Fetch complete anime data (basic + extended)
+    /// This will queue the basic fetch task and all extended data tasks
+    pub async fn queue_fetch_complete(&self, anime_id: u32, with_jikan: bool) -> Result<(), AppError> {
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            with_jikan = with_jikan,
+            "Queueing complete anime fetch (basic + extended data)"
+        );
+
+        // Queue basic fetch
+        self.queue_fetch_anime(anime_id, with_jikan).await?;
+
+        // Queue extended data (these will execute after basic fetch due to lower priority)
+        self.queue_fetch_all_extended_data(anime_id).await?;
+
+        Ok(())
+    }
 }
 
 impl ChildModule for MyAnimeListModule {
     type Input = FetchAnimeInput;
-    type Output = AnimeData;
+    // type Output = AnimeData;
+    type Output = ();
     
     fn name(&self) -> &str {
         "my_anime_list"
@@ -165,37 +259,38 @@ impl ChildModule for MyAnimeListModule {
             
             // Ok(anime)
 
-            info!(
-                module = %self.name(),
-                anime_id = input.anime_id,
-                "Fetching anime from MyAnimeList API"
-            );
+            // info!(
+            //     module = %self.name(),
+            //     anime_id = input.anime_id,
+            //     "Fetching anime from MyAnimeList API"
+            // );
             
-            // In a real implementation, use the actual MyAnimeList API
-            // Example URL: https://api.myanimelist.net/v2/anime/{id}
-            let url = format!("https://api.myanimelist.net/v2/anime/{}?fields=id,title,main_picture,alternative_titles,start_date,end_date,synopsis,mean,rank,popularity,num_list_users,num_scoring_users,nsfw,genres,created_at,updated_at,media_type,status,num_episodes,start_season,broadcast,source,average_episode_duration,rating,studios,pictures,background,related_anime,related_manga,statistics", input.anime_id);
+            // // In a real implementation, use the actual MyAnimeList API
+            // // Example URL: https://api.myanimelist.net/v2/anime/{id}
+            // let url = format!("https://api.myanimelist.net/v2/anime/{}?fields=id,title,main_picture,alternative_titles,start_date,end_date,synopsis,mean,rank,popularity,num_list_users,num_scoring_users,nsfw,genres,created_at,updated_at,media_type,status,num_episodes,start_season,broadcast,source,average_episode_duration,rating,studios,pictures,background,related_anime,related_manga,statistics", input.anime_id);
             
-            // Get API key from config
-            let api_key = self.config.get_api_key("my_anime_list")
-                .expect("API key should be validated during module creation");
+            // // Get API key from config
+            // let api_key = self.config.get_api_key("my_anime_list")
+            //     .expect("API key should be validated during module creation");
 
-            let config = RequestConfig::new().with_header("X-MAL-CLIENT-ID", api_key);
+            // let config = RequestConfig::new().with_header("X-MAL-CLIENT-ID", api_key);
             
-            // Use the custom fetch_json method with automatic retry
-            let anime = self.client.fetch_json::<AnimeData>(&url, Some(config)).await?;
+            // // Use the custom fetch_json method with automatic retry
+            // let anime = self.client.fetch_json::<AnimeData>(&url, Some(config)).await?;
             
-            info!(
-                module = %self.name(),
-                anime_id = anime.id,
-                title = %anime.title,
-                score = ?anime.score,
-                "Successfully fetched anime"
-            );
+            // info!(
+            //     module = %self.name(),
+            //     anime_id = anime.id,
+            //     title = %anime.title,
+            //     score = ?anime.score,
+            //     "Successfully fetched anime"
+            // );
             
             // In production, you would also store in database here:
             // store_anime_in_db(db, &anime).await?;
 
-            Ok(anime)
+            // Ok(anime)
+            Ok(())
         })
     }
 }
