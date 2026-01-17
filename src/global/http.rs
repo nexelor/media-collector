@@ -19,6 +19,7 @@ pub struct HttpClientManager {
 struct ClientPool {
     default: ClientWithLimiter,
     my_anime_list: ClientWithLimiter,
+    jikan: ClientWithLimiter,
     // Add more API-specific clients here
 }
 
@@ -107,6 +108,14 @@ impl HttpClientManager {
             .build()
             .expect("Failed to create MyAnimeList HTTP client");
 
+        // Create Jikan client with same rate limit as MAL
+        let jikan_rate_limit = config.get_rate_limit("jikan");
+        let jikan_client = Client::builder()
+            .timeout(Duration::from_secs(config.http.timeout_seconds))
+            .user_agent(&config.http.user_agent)
+            .build()
+            .expect("Failed to create Jikan HTTP client");
+
         Self {
             clients: Arc::new(ClientPool {
                 default: ClientWithLimiter {
@@ -118,6 +127,11 @@ impl HttpClientManager {
                     client: mal_client,
                     limiter: RateLimiter::new("my_anime_list", mal_rate_limit),
                     name: "my_anime_list".to_string(),
+                },
+                jikan: ClientWithLimiter {
+                    client: jikan_client,
+                    limiter: RateLimiter::new("jikan", jikan_rate_limit),
+                    name: "jikan".to_string(),
                 },
             }),
             config,
@@ -132,6 +146,11 @@ impl HttpClientManager {
     /// Get the MyAnimeList HTTP client with rate limiter
     pub fn my_anime_list(&self) -> &ClientWithLimiter {
         &self.clients.my_anime_list
+    }
+
+    /// Get the Jikan HTTP client with rate limiter
+    pub fn jikan(&self) -> &ClientWithLimiter {
+        &self.clients.jikan
     }
 }
 

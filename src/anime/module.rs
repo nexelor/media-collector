@@ -9,6 +9,7 @@ use crate::global::error::AppError;
 use crate::global::module::{ParentModule, ModuleMessage};
 use crate::global::queue::{QueueWorker, TaskQueue};
 
+#[derive(Clone)]
 pub struct AnimeModule {
     queue: TaskQueue,
 }

@@ -17,7 +17,8 @@ pub struct BatchFetchTask {
     id: String,
     anime_ids: Vec<u32>,
     api_key: String,
-    client_with_limiter: crate::global::http::ClientWithLimiter,
+    mal_client: crate::global::http::ClientWithLimiter,
+    jikan_client: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
     /// Whether to also fetch Jikan data for enrichment
     fetch_jikan: bool,
@@ -27,14 +28,16 @@ impl BatchFetchTask {
     pub fn new(
         anime_ids: Vec<u32>,
         api_key: String,
-        client_with_limiter: crate::global::http::ClientWithLimiter,
+        mal_client: crate::global::http::ClientWithLimiter,
+        jikan_client: crate::global::http::ClientWithLimiter,
     ) -> Self {
         let id = format!("mal_batch_{}", uuid::Uuid::new_v4());
         Self {
             id,
             anime_ids,
             api_key,
-            client_with_limiter,
+            mal_client,
+            jikan_client,
             created_at: chrono::Utc::now(),
             fetch_jikan: false,
         }
@@ -92,7 +95,8 @@ impl Task for BatchFetchTask {
             let mut fetch_task = super::fetch_anime::FetchAnimeTask::new(
                 *anime_id,
                 self.api_key.clone(),
-                self.client_with_limiter.clone(),
+                self.mal_client.clone(),
+                self.jikan_client.clone(),
             );
 
             if self.fetch_jikan {

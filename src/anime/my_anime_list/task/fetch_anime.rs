@@ -26,7 +26,8 @@ pub struct FetchAnimeTask {
     id: String,
     anime_id: u32,
     api_key: String,
-    client_with_limiter: crate::global::http::ClientWithLimiter,
+    mal_client: crate::global::http::ClientWithLimiter,
+    jikan_client: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
     /// Whether to also fetch Jikan data for enrichment
     with_jikan: bool,
@@ -36,14 +37,16 @@ impl FetchAnimeTask {
     pub fn new(
         anime_id: u32,
         api_key: String,
-        client_with_limiter: crate::global::http::ClientWithLimiter,
+        mal_client: crate::global::http::ClientWithLimiter,
+        jikan_client: crate::global::http::ClientWithLimiter,
     ) -> Self {
         let id = format!("mal_search_{}", uuid::Uuid::new_v4());
         Self {
             id,
             anime_id,
             api_key,
-            client_with_limiter,
+            mal_client,
+            jikan_client,
             created_at: chrono::Utc::now(),
             with_jikan: false,
         }
@@ -103,7 +106,7 @@ impl Task for FetchAnimeTask {
         let config = RequestConfig::new().with_header("X-MAL-CLIENT-ID", &self.api_key);
 
         debug!(task = %self.name(), url = %mal_url, "Fetching from MAL API");
-        let mal_response = self.client_with_limiter
+        let mal_response = self.mal_client
             .fetch_json::<MalAnimeResponse>(&mal_url, Some(config))
             .await?;
 
@@ -115,7 +118,7 @@ impl Task for FetchAnimeTask {
         );
 
         // Convert MAL response to unified AnimeData
-        let mut anime_data = mal_to_anime_data(
+        let mut anime_data: AnimeData = mal_to_anime_data(
             mal_response, 
             Some(format!("https://myanimelist.net/anime/{}", self.anime_id))
         );
@@ -168,12 +171,8 @@ impl FetchAnimeTask {
             "Fetching from Jikan API"
         );
 
-        // Jikan has a rate limit of 3 requests/second, 60 requests/minute
-        // We'll use a simple delay to respect this
-        tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
-
-        // Use default HTTP client (no auth needed for Jikan)
-        let response = self.client_with_limiter
+        // Use Jikan client with its own rate limiter (no manual delay needed)
+        let response = self.jikan_client  // CHANGED: use jikan_client
             .fetch_json::<JikanAnimeResponse>(&jikan_url, None)
             .await?;
 

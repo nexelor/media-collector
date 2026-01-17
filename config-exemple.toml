@@ -5,6 +5,11 @@
 # Application-wide settings
 log_level = "info"  # Options: trace, debug, info, warn, error
 
+[api]
+enabled = true
+host = "0.0.0.0"
+port = 3000
+
 [database]
 host = "localhost"
 port = 27017
@@ -22,11 +27,19 @@ enabled = false
 enabled = true
 rate_limit = 2.0  # requests per second
 api_key = "YOUR_MAL_API_KEY_HERE"  # Required! Get from: https://myanimelist.net/apiconfig
+requires_api_key = true
+
+[child_modules.jikan]
+enabled = true
+rate_limit = 2.0  # requests per second (same as MAL to respect both APIs)
+api_key = ""  # Jikan doesn't require API key
+requires_api_key = false
 
 [child_modules.anilist]
 enabled = false
 rate_limit = 90.0  # AniList allows 90 requests per minute = 1.5/sec
 api_key = ""  # Optional - AniList doesn't require API key for basic queries
+requires_api_key = false
 
 [child_modules.kitsu]
 enabled = false

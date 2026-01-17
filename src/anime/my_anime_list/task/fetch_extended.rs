@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use serde::Deserialize;
-use tracing::{info, debug};
+use tracing::info;
 
 use crate::global::queue::{TaskData, TaskPriority, TaskStatus};
 use crate::global::{
@@ -20,7 +20,7 @@ use crate::anime::my_anime_list::{
 pub struct FetchCharactersTask {
     id: String,
     anime_id: u32,
-    client_with_limiter: crate::global::http::ClientWithLimiter,
+    jikan_client: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -62,13 +62,13 @@ struct JikanPersonInfo {
 impl FetchCharactersTask {
     pub fn new(
         anime_id: u32,
-        client_with_limiter: crate::global::http::ClientWithLimiter,
+        jikan_client: crate::global::http::ClientWithLimiter,
     ) -> Self {
         let id = format!("fetch_characters_{}", anime_id);
         Self {
             id,
             anime_id,
-            client_with_limiter,
+            jikan_client,
             created_at: chrono::Utc::now(),
         }
     }
@@ -111,7 +111,7 @@ impl Task for FetchCharactersTask {
         // Respect Jikan rate limit
         tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
 
-        let response = self.client_with_limiter
+        let response = self.jikan_client
             .fetch_json::<JikanCharactersResponse>(&url, None)
             .await?;
 
@@ -157,7 +157,7 @@ impl Task for FetchCharactersTask {
 pub struct FetchStaffTask {
     id: String,
     anime_id: u32,
-    client_with_limiter: crate::global::http::ClientWithLimiter,
+    jikan_client: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -175,13 +175,13 @@ struct JikanStaff {
 impl FetchStaffTask {
     pub fn new(
         anime_id: u32,
-        client_with_limiter: crate::global::http::ClientWithLimiter,
+        jikan_client: crate::global::http::ClientWithLimiter,
     ) -> Self {
         let id = format!("fetch_staff_{}", anime_id);
         Self {
             id,
             anime_id,
-            client_with_limiter,
+            jikan_client,
             created_at: chrono::Utc::now(),
         }
     }
@@ -223,7 +223,7 @@ impl Task for FetchStaffTask {
         
         tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
 
-        let response = self.client_with_limiter
+        let response = self.jikan_client
             .fetch_json::<JikanStaffResponse>(&url, None)
             .await?;
 
@@ -259,7 +259,7 @@ impl Task for FetchStaffTask {
 pub struct FetchEpisodesTask {
     id: String,
     anime_id: u32,
-    client_with_limiter: crate::global::http::ClientWithLimiter,
+    jikan_client: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -286,13 +286,13 @@ struct JikanEpisode {
 impl FetchEpisodesTask {
     pub fn new(
         anime_id: u32,
-        client_with_limiter: crate::global::http::ClientWithLimiter,
+        jikan_client: crate::global::http::ClientWithLimiter,
     ) -> Self {
         let id = format!("fetch_episodes_{}", anime_id);
         Self {
             id,
             anime_id,
-            client_with_limiter,
+            jikan_client,
             created_at: chrono::Utc::now(),
         }
     }
@@ -334,7 +334,7 @@ impl Task for FetchEpisodesTask {
         
         tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
 
-        let response = self.client_with_limiter
+        let response = self.jikan_client
             .fetch_json::<JikanEpisodesResponse>(&url, None)
             .await?;
 

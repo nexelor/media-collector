@@ -6,10 +6,12 @@ use tracing::{info, debug, error, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::global::{config::AppConfig, database::DatabaseInstance, http::HttpClientManager, module::{ChildModule, ModuleHandle, ParentModule}};
+use crate::{anime::module::AnimeModule, global::{config::AppConfig, database::DatabaseInstance, http::HttpClientManager, module::{ChildModule, ModuleHandle, ParentModule}}, picture::PictureFetcherModule};
 
 mod anime;
 mod global;
+mod picture;
+mod api;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -80,16 +82,35 @@ async fn main() -> Result<()> {
     // Store module handles for graceful shutdown
     let mut module_handles = Vec::new();
 
+    // Store module references for API
+    let mut anime_module_ref: Option<Arc<AnimeModule>> = None;
+    let mut picture_module_ref: Option<Arc<PictureFetcherModule>> = None;
+
+    // Initialize picture fetcher module
+    info!("Initializing picture fetcher module");
+    let picture_storage_path = "./pictures";
+    let picture_client = http_manager.default().client.clone();
+    let picture_module = PictureFetcherModule::new(
+        db.clone(),
+        picture_client,
+        picture_storage_path,
+    );
+    
+    picture_module_ref = Some(Arc::new(picture_module.clone()));
+    let picture_handle = spawn_parent_module(picture_module, db.clone()).await;
+    module_handles.push(picture_handle);
+    
     // Launch anime module
     if config.is_parent_module_enabled("anime") {
         info!("Initializing anime module");
         
-        let http_client = http_manager.my_anime_list().client.clone();
-        let anime_module = anime::module::AnimeModule::new(db.clone(), http_client);
+        let mal_client = http_manager.my_anime_list().client.clone();
+        let anime_module = AnimeModule::new(
+            db.clone(), 
+            mal_client,
+        );
     
-        // Store queue reference for later use
-        // let anime_queue = anime_module.queue().clone();
-
+        anime_module_ref = Some(Arc::new(anime_module.clone()));
         let handle = spawn_parent_module(anime_module, db.clone()).await;
         module_handles.push(handle);
     } else {
@@ -110,6 +131,44 @@ async fn main() -> Result<()> {
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+    // Initialize API state and server
+    if config.api.enabled {
+        info!("Initializing API server");
+        
+        let mut api_state = api::state::ApiState::new(
+            config.clone(),
+            db.clone(),
+            Arc::new(http_manager.clone()),
+        );
+        
+        // Add module references
+        if let Some(ref anime_mod) = anime_module_ref {
+            api_state = api_state.with_anime_module(anime_mod.clone());
+        }
+        
+        if let Some(ref picture_mod) = picture_module_ref {
+            api_state = api_state.with_picture_module(picture_mod.clone());
+        }
+        
+        let api_host = config.api.host.clone();
+        let api_port = config.api.port;
+        
+        // Spawn API server in background
+        tokio::spawn(async move {
+            if let Err(e) = api::start_api_server(api_state, &api_host, api_port).await {
+                error!(error = %e, "API server failed");
+            }
+        });
+        
+        info!(
+            host = %config.api.host,
+            port = config.api.port,
+            "API server started"
+        );
+    } else {
+        info!("API server is disabled in config");
+    }
 
     // Keep running until Ctrl+C
     info!("Application running, press Ctrl+C to shutdown");
@@ -151,6 +210,7 @@ async fn spawn_parent_module<M: ParentModule + 'static>(
 }
 
 /// Spawn a child module for a single task
+#[allow(dead_code)]
 async fn spawn_child_module<M: ChildModule + 'static>(
     module: M,
     db: Arc<DatabaseInstance>,

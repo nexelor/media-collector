@@ -8,6 +8,7 @@ use crate::global::error::ConfigError;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     pub app: AppSettings,
+    pub api: ApiConfig,
     pub database: DatabaseConfig,
     pub modules: ModulesConfig,
     pub child_modules: HashMap<String, ChildModuleConfig>,
@@ -19,6 +20,14 @@ pub struct AppSettings {
     pub log_level: String,
     #[serde(default)]
     pub logging: LoggingConfig,
+}
+
+// Add new ApiConfig struct:
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ApiConfig {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -61,6 +70,16 @@ fn default_log_rotation() -> LogRotation {
 
 fn default_log_to_console() -> bool {
     true
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            host: "0.0.0.0".to_string(),
+            port: 3000,
+        }
+    }
 }
 
 impl Default for LoggingConfig {

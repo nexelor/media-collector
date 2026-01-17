@@ -19,7 +19,8 @@ pub struct FetchAnimeInput {
 }
 
 pub struct MyAnimeListModule {
-    client: ClientWithLimiter,
+    mal_client: ClientWithLimiter,
+    jikan_client: ClientWithLimiter,
     config: Arc<AppConfig>,
     queue: TaskQueue,
 }
@@ -27,13 +28,22 @@ pub struct MyAnimeListModule {
 impl MyAnimeListModule {
     /// Create a new MyAnimeList module
     /// Returns None if the module cannot be started due to missing configuration
-    pub fn new(client: ClientWithLimiter, config: Arc<AppConfig>, queue: TaskQueue) -> Option<Self> {
-        // Validate configuration - requires API key
+    pub fn new(
+        mal_client: ClientWithLimiter,
+        jikan_client: ClientWithLimiter,  // NEW parameter
+        config: Arc<AppConfig>,
+        queue: TaskQueue,
+    ) -> Option<Self> {
         if !config.can_start_child_module("my_anime_list", true) {
             return None;
         }
 
-        Some(Self { client, config, queue })
+        Some(Self { 
+            mal_client,    // CHANGED
+            jikan_client,  // NEW
+            config, 
+            queue 
+        })
     }
 
     /// Check if this module is enabled and properly configured
@@ -49,7 +59,8 @@ impl MyAnimeListModule {
         let mut task = FetchAnimeTask::new(
             anime_id,
             api_key,
-            self.client.clone(),
+            self.mal_client.clone(),
+            self.jikan_client.clone(),
         );
 
         if with_jikan {
@@ -75,7 +86,7 @@ impl MyAnimeListModule {
             query.clone(),
             limit,
             api_key,
-            self.client.clone(),
+            self.mal_client.clone(),
         );
 
         info!(
@@ -95,7 +106,8 @@ impl MyAnimeListModule {
         let mut task = UpdateAnimeTask::new(
             anime_id,
             api_key,
-            self.client.clone(),
+            self.mal_client.clone(),
+            self.jikan_client.clone(),
         );
 
         if with_jikan {
@@ -119,7 +131,8 @@ impl MyAnimeListModule {
         let mut task = BatchFetchTask::new(
             anime_ids.clone(),
             api_key,
-            self.client.clone(),
+            self.mal_client.clone(),
+            self.jikan_client.clone(),
         );
 
         if with_jikan {
@@ -140,7 +153,7 @@ impl MyAnimeListModule {
     pub async fn queue_fetch_characters(&self, anime_id: u32) -> Result<(), AppError> {
         let task = FetchCharactersTask::new(
             anime_id,
-            self.client.clone(),
+            self.jikan_client.clone(),
         );
 
         info!(
@@ -156,7 +169,7 @@ impl MyAnimeListModule {
     pub async fn queue_fetch_staff(&self, anime_id: u32) -> Result<(), AppError> {
         let task = FetchStaffTask::new(
             anime_id,
-            self.client.clone(),
+            self.jikan_client.clone(),
         );
 
         info!(
@@ -172,7 +185,7 @@ impl MyAnimeListModule {
     pub async fn queue_fetch_episodes(&self, anime_id: u32) -> Result<(), AppError> {
         let task = FetchEpisodesTask::new(
             anime_id,
-            self.client.clone(),
+            self.jikan_client.clone(),
         );
 
         info!(
