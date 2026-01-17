@@ -1,6 +1,6 @@
 use mongodb::Database;
 
-use crate::global::error::{AppError, DatabaseError};
+use super::error::{AppError, DatabaseError};
 
 #[derive(Clone)]
 pub struct DatabaseInstance {
