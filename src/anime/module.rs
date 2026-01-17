@@ -7,12 +7,29 @@ use tracing::{info, debug, warn};
 use crate::global::database::DatabaseInstance;
 use crate::global::error::AppError;
 use crate::global::module::{ParentModule, ModuleMessage};
+use crate::global::queue::{QueueWorker, TaskQueue};
 
-pub struct AnimeModule;
+pub struct AnimeModule {
+    queue: TaskQueue,
+}
 
 impl AnimeModule {
-    pub fn new() -> Self {
-        Self
+    pub fn new(db: Arc<DatabaseInstance>, client: reqwest::Client) -> Self {
+        let (queue, rx) = TaskQueue::new("anime_queue".to_string(), 1000);
+        
+        // Spawn the queue worker
+        let worker = QueueWorker::new("anime_worker".to_string(), db, client);
+        tokio::spawn(async move {
+            if let Err(e) = worker.run(rx).await {
+                tracing::error!(error = %e, "Queue worker error");
+            }
+        });
+
+        Self { queue }
+    }
+
+    pub fn queue(&self) -> &TaskQueue {
+        &self.queue
     }
 }
 
@@ -23,7 +40,7 @@ impl ParentModule for AnimeModule {
     
     fn run(
         &self,
-        db: Arc<DatabaseInstance>,
+        _db: Arc<DatabaseInstance>,
         mut rx: mpsc::Receiver<ModuleMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + '_>> {
         Box::pin(async move {
@@ -35,6 +52,10 @@ impl ParentModule for AnimeModule {
                         match msg {
                             Some(ModuleMessage::Shutdown) => {
                                 info!(module = %self.name(), "Received shutdown signal");
+                                // Shutdown the queue
+                                if let Err(e) = self.queue.shutdown().await {
+                                    warn!(module = %self.name(), error = %e, "Failed to shutdown queue");
+                                }
                                 break;
                             }
                             Some(ModuleMessage::Custom(data)) => {

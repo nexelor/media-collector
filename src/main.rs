@@ -37,6 +37,43 @@ async fn main() -> Result<()> {
     let db = DatabaseInstance::new(&config.database.host, config.database.port, &config.database.name).await?;
     let db = Arc::new(db);
 
+    // Initialize child module collections
+    if config.is_parent_module_enabled("anime") {
+        if anime::my_anime_list::module::MyAnimeListModule::is_available(&config) {
+            info!("Initializing MyAnimeList database collections");
+            anime::my_anime_list::database::initialize_collections(db.db()).await?;
+        }
+    }
+
+    // Spawn database maintenance task
+    let db_clone = db.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await; // Every hour
+
+            info!("Running database maintenance");
+
+            // Clean up old data (30 days)
+            if let Err(e) = db_clone.cleanup_old_data(30).await {
+                error!(error = %e, "Database cleanup failed");
+            }
+
+            // Get and log stats
+            match db_clone.get_stats().await {
+                Ok(stats) => {
+                    info!(
+                        pending = stats.pending_tasks,
+                        running = stats.running_tasks,
+                        completed = stats.completed_tasks,
+                        failed = stats.failed_tasks,
+                        "Database statistics"
+                    );
+                }
+                Err(e) => error!(error = %e, "Failed to get database stats"),
+            }
+        }
+    });
+
     // Initialize HTTP client manager with rate limiters
     let http_manager = HttpClientManager::new(config.clone());
     
@@ -46,7 +83,13 @@ async fn main() -> Result<()> {
     // Launch anime module
     if config.is_parent_module_enabled("anime") {
         info!("Initializing anime module");
-        let anime_module = anime::module::AnimeModule::new();
+        
+        let http_client = http_manager.my_anime_list().client.clone();
+        let anime_module = anime::module::AnimeModule::new(db.clone(), http_client);
+    
+        // Store queue reference for later use
+        // let anime_queue = anime_module.queue().clone();
+
         let handle = spawn_parent_module(anime_module, db.clone()).await;
         module_handles.push(handle);
     } else {
@@ -67,27 +110,6 @@ async fn main() -> Result<()> {
     }
 
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-    if anime::my_anime_list::module::MyAnimeListModule::is_available(&config) {
-        info!("Testing MyAnimeList child module");
-        let mal_client = http_manager.my_anime_list().clone();
-        
-        match anime::my_anime_list::module::MyAnimeListModule::new(mal_client.clone(), config.clone()) {
-            Some(mal_module) => {
-                let input = anime::my_anime_list::module::FetchAnimeInput { anime_id: 1 };
-                
-                match spawn_child_module(mal_module, db.clone(), mal_client.client.clone(), input).await {
-                    Ok(anime_data) => info!(?anime_data, "Successfully fetched anime data"),
-                    Err(e) => error!(error = %e, "Failed to fetch anime"),
-                }
-            }
-            None => {
-                error!("Failed to initialize MyAnimeList module - check configuration");
-            }
-        }
-    } else {
-        warn!("MyAnimeList child module is not available (disabled or missing required configuration)");
-    }
 
     // Keep running until Ctrl+C
     info!("Application running, press Ctrl+C to shutdown");
