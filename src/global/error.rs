@@ -1,4 +1,3 @@
-// src/global/error.rs
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error(transparent)]
@@ -48,4 +47,16 @@ pub enum HttpError {
 
     #[error("max retries exceeded")]
     MaxRetriesExceeded,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("missing required API key for module: {0}")]
+    MissingApiKey(String),
+
+    #[error("invalid configuration: {0}")]
+    Invalid(String),
+
+    #[error("failed to load configuration: {0}")]
+    LoadFailed(String),
 }

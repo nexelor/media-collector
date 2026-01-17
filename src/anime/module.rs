@@ -1,8 +1,8 @@
-// src/anime/module.rs
 use std::sync::Arc;
 use std::pin::Pin;
 use std::future::Future;
 use tokio::sync::mpsc;
+use tracing::{info, debug, warn};
 
 use crate::global::database::DatabaseInstance;
 use crate::global::error::AppError;
@@ -27,21 +27,21 @@ impl ParentModule for AnimeModule {
         mut rx: mpsc::Receiver<ModuleMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + '_>> {
         Box::pin(async move {
-            println!("[{}] Module started", self.name());
+            info!(module = %self.name(), "Module started");
             
             loop {
                 tokio::select! {
                     msg = rx.recv() => {
                         match msg {
                             Some(ModuleMessage::Shutdown) => {
-                                println!("[{}] Shutting down", self.name());
+                                info!(module = %self.name(), "Received shutdown signal");
                                 break;
                             }
                             Some(ModuleMessage::Custom(data)) => {
-                                println!("[{}] Received custom message: {}", self.name(), data);
+                                debug!(module = %self.name(), message = %data, "Received custom message");
                             }
                             None => {
-                                println!("[{}] Channel closed", self.name());
+                                warn!(module = %self.name(), "Channel closed unexpectedly");
                                 break;
                             }
                         }
@@ -49,13 +49,13 @@ impl ParentModule for AnimeModule {
                     
                     // Periodic tasks
                     _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {
-                        println!("[{}] Heartbeat - running periodic tasks", self.name());
+                        debug!(module = %self.name(), "Running periodic maintenance tasks");
                         // Add periodic maintenance tasks here
                     }
                 }
             }
             
-            println!("[{}] Module stopped", self.name());
+            info!(module = %self.name(), "Module stopped");
             Ok(())
         })
     }

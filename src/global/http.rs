@@ -1,10 +1,11 @@
-// src/global/http.rs
 use std::sync::Arc;
 use std::time::Duration;
 use std::collections::HashMap;
 use reqwest::{Client, Response, StatusCode};
 use serde::de::DeserializeOwned;
+use tracing::{info, debug, warn, error};
 
+use crate::global::config::AppConfig;
 use crate::global::module::RateLimiter;
 use crate::global::error::HttpError;
 
@@ -12,6 +13,7 @@ use crate::global::error::HttpError;
 #[derive(Clone)]
 pub struct HttpClientManager {
     clients: Arc<ClientPool>,
+    config: Arc<AppConfig>,
 }
 
 struct ClientPool {
@@ -39,7 +41,7 @@ impl Default for RetryConfig {
     fn default() -> Self {
         Self {
             max_retries: 3,
-            base_delay: Duration::from_secs(1),
+            base_delay: Duration::from_millis(1000),
             max_delay: Duration::from_secs(60),
         }
     }
@@ -89,34 +91,36 @@ impl RequestConfig {
 }
 
 impl HttpClientManager {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<AppConfig>) -> Self {
         // Create default client
         let default_client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .user_agent("media-collector/0.1.0")
+            .timeout(Duration::from_secs(config.http.timeout_seconds))
+            .user_agent(&config.http.user_agent)
             .build()
             .expect("Failed to create default HTTP client");
 
         // Create MyAnimeList client with custom settings
+        let mal_rate_limit = config.get_rate_limit("my_anime_list");
         let mal_client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .user_agent("media-collector/0.1.0")
+            .timeout(Duration::from_secs(config.http.timeout_seconds))
+            .user_agent(&config.http.user_agent)
             .build()
             .expect("Failed to create MyAnimeList HTTP client");
 
         Self {
             clients: Arc::new(ClientPool {
                 default: ClientWithLimiter {
-                    client: default_client,
-                    limiter: RateLimiter::new("default", 10.0),
+                    client: default_client.clone(),
+                    limiter: RateLimiter::new("default", config.http.default_rate_limit),
                     name: "default".to_string(),
                 },
                 my_anime_list: ClientWithLimiter {
                     client: mal_client,
-                    limiter: RateLimiter::new("my_anime_list", 2.0),
+                    limiter: RateLimiter::new("my_anime_list", mal_rate_limit),
                     name: "my_anime_list".to_string(),
                 },
             }),
+            config,
         }
     }
 
@@ -185,8 +189,13 @@ impl ClientWithLimiter {
             // Acquire rate limit permission
             self.limiter.acquire().await;
             
-            println!("[{}] Fetching: {} (attempt {}/{})", 
-                self.name, url, attempt, retry_config.max_retries + 1);
+            debug!(
+                client = %self.name,
+                url = %url,
+                attempt = attempt,
+                max_attempts = retry_config.max_retries + 1,
+                "Making HTTP request"
+            );
 
             // Build the request with headers
             let mut request = self.client.get(url);
@@ -200,7 +209,7 @@ impl ClientWithLimiter {
             let response = match request.send().await {
                 Ok(resp) => resp,
                 Err(e) => {
-                    eprintln!("[{}] Request failed: {}", self.name, e);
+                    error!(client = %self.name, url = %url, error = %e, "HTTP request failed");
                     return Err(HttpError::RequestFailed(e));
                 }
             };
@@ -211,6 +220,7 @@ impl ClientWithLimiter {
             match status {
                 StatusCode::OK => {
                     // Success - deserialize and return
+                    debug!(client = %self.name, url = %url, status = %status, "Request successful");
                     return self.deserialize_response(response).await;
                 }
                 
@@ -219,7 +229,7 @@ impl ClientWithLimiter {
                     let error_body = response.text().await
                         .unwrap_or_else(|_| "No error message".to_string());
                     
-                    eprintln!("[{}] Resource not found (404): {}", self.name, url);
+                    warn!(client = %self.name, url = %url, "Resource not found (404)");
                     return Err(HttpError::NotFound(error_body));
                 }
                 
@@ -230,7 +240,12 @@ impl ClientWithLimiter {
                         .unwrap_or_else(|_| "Rate limit exceeded".to_string());
                     
                     if attempt > retry_config.max_retries {
-                        eprintln!("[{}] Max retries exceeded after rate limit", self.name);
+                        error!(
+                            client = %self.name,
+                            url = %url,
+                            attempts = attempt,
+                            "Max retries exceeded after rate limit"
+                        );
                         return Err(HttpError::RateLimited {
                             retry_after,
                             message: error_body,
@@ -243,8 +258,13 @@ impl ClientWithLimiter {
                         std::cmp::min(exponential, retry_config.max_delay)
                     });
                     
-                    println!("[{}] Rate limited ({}), retrying in {:?}...", 
-                        self.name, status.as_u16(), delay);
+                    warn!(
+                        client = %self.name,
+                        status = %status.as_u16(),
+                        retry_in = ?delay,
+                        attempt = attempt,
+                        "Rate limited, will retry"
+                    );
                     
                     tokio::time::sleep(delay).await;
                     continue;
@@ -255,8 +275,12 @@ impl ClientWithLimiter {
                     let error_body = response.text().await
                         .unwrap_or_else(|_| "Unknown error".to_string());
                     
-                    eprintln!("[{}] Unexpected status {}: {}", 
-                        self.name, status.as_u16(), error_body);
+                    error!(
+                        client = %self.name,
+                        status = %status.as_u16(),
+                        error = %error_body,
+                        "Unexpected HTTP status"
+                    );
                     
                     return Err(HttpError::UnexpectedStatus {
                         status: status.as_u16(),
@@ -270,7 +294,7 @@ impl ClientWithLimiter {
     /// Deserialize the response body to type T
     async fn deserialize_response<T: DeserializeOwned>(&self, response: Response) -> Result<T, HttpError> {
         response.json::<T>().await.map_err(|e| {
-            eprintln!("[{}] Deserialization failed: {}", self.name, e);
+            error!(client = %self.name, error = %e, "Failed to deserialize JSON response");
             HttpError::DeserializationFailed(e.to_string())
         })
     }

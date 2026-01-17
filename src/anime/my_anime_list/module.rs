@@ -1,9 +1,10 @@
-// src/anime/my_anime_list/module.rs
 use std::sync::Arc;
 use std::pin::Pin;
 use std::future::Future;
+use tracing::{info, warn};
 
 use super::model::AnimeData;
+use crate::global::config::AppConfig;
 use crate::global::database::DatabaseInstance;
 use crate::global::error::AppError;
 use crate::global::http::{ClientWithLimiter, RequestConfig};
@@ -16,11 +17,24 @@ pub struct FetchAnimeInput {
 
 pub struct MyAnimeListModule {
     client: ClientWithLimiter,
+    config: Arc<AppConfig>,
 }
 
 impl MyAnimeListModule {
-    pub fn new(client: ClientWithLimiter) -> Self {
-        Self { client }
+    /// Create a new MyAnimeList module
+    /// Returns None if the module cannot be started due to missing configuration
+    pub fn new(client: ClientWithLimiter, config: Arc<AppConfig>) -> Option<Self> {
+        // Validate configuration - requires API key
+        if !config.can_start_child_module("my_anime_list", true) {
+            return None;
+        }
+
+        Some(Self { client, config })
+    }
+
+    /// Check if this module is enabled and properly configured
+    pub fn is_available(config: &AppConfig) -> bool {
+        config.can_start_child_module("my_anime_list", true)
     }
 }
 
@@ -67,17 +81,32 @@ impl ChildModule for MyAnimeListModule {
             
             // Ok(anime)
 
-            println!("[{}] Fetching anime {}", self.name(), input.anime_id);
+            info!(
+                module = %self.name(),
+                anime_id = input.anime_id,
+                "Fetching anime from MyAnimeList API"
+            );
             
             // In a real implementation, use the actual MyAnimeList API
             // Example URL: https://api.myanimelist.net/v2/anime/{id}
             let url = format!("https://api.myanimelist.net/v2/anime/{}?fields=id,title,main_picture,alternative_titles,start_date,end_date,synopsis,mean,rank,popularity,num_list_users,num_scoring_users,nsfw,genres,created_at,updated_at,media_type,status,num_episodes,start_season,broadcast,source,average_episode_duration,rating,studios,pictures,background,related_anime,related_manga,statistics", input.anime_id);
-            let config = RequestConfig::new().with_header("X-MAL-CLIENT-ID", "4c88492f0f5cebd9d7cfdd640de1370e");
+            
+            // Get API key from config
+            let api_key = self.config.get_api_key("my_anime_list")
+                .expect("API key should be validated during module creation");
+
+            let config = RequestConfig::new().with_header("X-MAL-CLIENT-ID", api_key);
             
             // Use the custom fetch_json method with automatic retry
             let anime = self.client.fetch_json::<AnimeData>(&url, Some(config)).await?;
             
-            println!("[{}] Successfully fetched: {}", self.name(), anime.title);
+            info!(
+                module = %self.name(),
+                anime_id = anime.id,
+                title = %anime.title,
+                score = ?anime.score,
+                "Successfully fetched anime"
+            );
             
             // In production, you would also store in database here:
             // store_anime_in_db(db, &anime).await?;

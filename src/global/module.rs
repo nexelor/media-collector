@@ -6,6 +6,7 @@ use std::num::NonZeroU32;
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use governor::clock::{Clock, DefaultClock};
 use governor::state::{InMemoryState, NotKeyed};
+use tracing::{debug, trace};
 
 use super::{database::DatabaseInstance, error::AppError};
 
@@ -87,13 +88,21 @@ impl RateLimiter {
         loop {
             match self.limiter.check() {
                 Ok(_) => {
-                    println!("[{}] Rate limiter: permit acquired ({:.1} req/s)", 
-                        self.name, self.requests_per_second);
+                    trace!(
+                        limiter = %self.name,
+                        rate = %self.requests_per_second,
+                        "Rate limit permit acquired"
+                    );
                     break;
                 }
                 Err(not_until) => {
                     let clock = DefaultClock::default();
                     let wait_duration = not_until.wait_time_from(clock.now());
+                    debug!(
+                        limiter = %self.name,
+                        wait = ?wait_duration,
+                        "Rate limit reached, waiting"
+                    );
                     tokio::time::sleep(wait_duration).await;
                 }
             }

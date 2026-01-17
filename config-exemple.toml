@@ -1,0 +1,57 @@
+# Media Collector Configuration
+# Place this file in the root of your project directory (same level as Cargo.toml)
+
+[app]
+# Application-wide settings
+log_level = "info"  # Options: trace, debug, info, warn, error
+
+[database]
+host = "localhost"
+port = 27017
+name = "media_collector"
+
+# Parent Modules Configuration
+[modules.anime]
+enabled = true
+
+[modules.manga]
+enabled = false
+
+# Child Modules Configuration - Anime
+[child_modules.my_anime_list]
+enabled = true
+rate_limit = 2.0  # requests per second
+api_key = "YOUR_MAL_API_KEY_HERE"  # Required! Get from: https://myanimelist.net/apiconfig
+
+[child_modules.anilist]
+enabled = false
+rate_limit = 90.0  # AniList allows 90 requests per minute = 1.5/sec
+api_key = ""  # Optional - AniList doesn't require API key for basic queries
+
+[child_modules.kitsu]
+enabled = false
+rate_limit = 10.0
+api_key = ""  # Optional
+
+# Child Modules Configuration - Manga
+[child_modules.manga_updates]
+enabled = false
+rate_limit = 5.0
+api_key = ""  # Add your API key if required
+
+[child_modules.mangadex]
+enabled = false
+rate_limit = 5.0
+api_key = ""  # Optional
+
+# HTTP Client Settings
+[http]
+timeout_seconds = 30
+user_agent = "media-collector/0.1.0"
+default_rate_limit = 10.0
+
+# Retry Configuration
+[http.retry]
+max_retries = 3
+base_delay_ms = 1000
+max_delay_ms = 60000
