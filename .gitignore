@@ -3,3 +3,6 @@
 /src-old
 
 config.toml
+
+/logs
+*.log

@@ -17,6 +17,62 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppSettings {
     pub log_level: String,
+    #[serde(default)]
+    pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct LoggingConfig {
+    #[serde(default = "default_log_to_file")]
+    pub log_to_file: bool,
+    #[serde(default = "default_log_directory")]
+    pub log_directory: String,
+    #[serde(default = "default_log_file_prefix")]
+    pub log_file_prefix: String,
+    #[serde(default = "default_log_rotation")]
+    pub log_rotation: LogRotation,
+    #[serde(default = "default_log_to_console")]
+    pub log_to_console: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogRotation {
+    Daily,
+    Hourly,
+    Never,
+}
+
+fn default_log_to_file() -> bool {
+    true
+}
+
+fn default_log_directory() -> String {
+    "./logs".to_string()
+}
+
+fn default_log_file_prefix() -> String {
+    "media-collector".to_string()
+}
+
+fn default_log_rotation() -> LogRotation {
+    LogRotation::Daily
+}
+
+fn default_log_to_console() -> bool {
+    true
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            log_to_file: default_log_to_file(),
+            log_directory: default_log_directory(),
+            log_file_prefix: default_log_file_prefix(),
+            log_rotation: default_log_rotation(),
+            log_to_console: default_log_to_console(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
