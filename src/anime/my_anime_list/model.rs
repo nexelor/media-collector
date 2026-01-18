@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, NaiveTime, Utc};
 use mongodb::bson;
+use serde_with::{serde_as, DisplayFromStr};
 
 // ========================================================================
 // Main Anime Data Model (combines MAL and Jikan data)
@@ -177,18 +178,25 @@ pub struct MalNode {
     pub main_picture: Option<MalPicture>,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MalStatistics {
     pub num_list_users: i32,
     pub status: MalStatusStats,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MalStatusStats {
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub watching: Option<i32>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub completed: Option<i32>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub on_hold: Option<i32>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub dropped: Option<i32>,
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub plan_to_watch: Option<i32>,
 }
 
@@ -257,11 +265,13 @@ pub struct JikanAnime {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JikanImages {
+    #[serde(default)]
     pub jpg: JikanImage,
+    #[serde(default)]
     pub webp: JikanImage,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JikanImage {
     pub image_url: Option<String>,
     pub small_image_url: Option<String>,
@@ -355,11 +365,13 @@ pub struct Title {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Images {
+    #[serde(default)]
     pub jpg: Image,
+    #[serde(default)]
     pub webp: Image,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Image {
     pub image_url: String,
     pub small_image_url: String,

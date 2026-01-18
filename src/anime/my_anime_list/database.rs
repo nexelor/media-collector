@@ -408,7 +408,7 @@ pub async fn bulk_insert_anime(db: &Database, anime_list: Vec<AnimeData>) -> Res
         return Ok(0);
     }
 
-    let collection = db.collection::<AnimeData>("anime");
+    let collection = db.collection::<AnimeData>(COLLECTION_NAME);
     
     let result = collection.insert_many(anime_list).await
         .map_err(|e| DatabaseError::Query(format!("Failed to bulk insert: {}", e)))?;
@@ -423,7 +423,7 @@ pub async fn update_anime_extended_data<T: Serialize>(
     field: &str,
     data: &T,
 ) -> Result<(), DatabaseError> {
-    let collection = db.collection::<AnimeData>("anime");
+    let collection = db.collection::<AnimeData>(COLLECTION_NAME);
     
     let filter = doc! { "mal_id": mal_id as i32 };
     let update = doc! {

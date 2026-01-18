@@ -4,7 +4,7 @@ use std::future::Future;
 use tracing::{info, warn};
 
 use super::model::AnimeData;
-use crate::anime::my_anime_list::task::{BatchFetchTask, FetchCharactersTask, FetchEpisodesTask, FetchStaffTask, SearchAnimeTask, UpdateAnimeTask};
+use crate::anime::my_anime_list::task::{BatchFetchTask, FetchCharactersTask, FetchEpisodesTask, FetchMoreInfoTask, FetchPicturesTask, FetchRecommendationsTask, FetchStaffTask, FetchStatisticsTask, FetchVideosTask, SearchAnimeTask, UpdateAnimeTask};
 use crate::anime::my_anime_list::task::fetch_anime::FetchAnimeTask;
 use crate::global::config::AppConfig;
 use crate::global::database::DatabaseInstance;
@@ -197,21 +197,6 @@ impl MyAnimeListModule {
         self.queue.enqueue(Box::new(task)).await
     }
 
-    /// Queue all extended data tasks for an anime (characters, staff, episodes)
-    pub async fn queue_fetch_all_extended_data(&self, anime_id: u32) -> Result<(), AppError> {
-        info!(
-            module = "my_anime_list",
-            anime_id = anime_id,
-            "Queueing all extended data tasks"
-        );
-
-        self.queue_fetch_characters(anime_id).await?;
-        self.queue_fetch_staff(anime_id).await?;
-        self.queue_fetch_episodes(anime_id).await?;
-
-        Ok(())
-    }
-
     /// Fetch complete anime data (basic + extended)
     /// This will queue the basic fetch task and all extended data tasks
     pub async fn queue_fetch_complete(&self, anime_id: u32, with_jikan: bool) -> Result<(), AppError> {
@@ -227,6 +212,106 @@ impl MyAnimeListModule {
 
         // Queue extended data (these will execute after basic fetch due to lower priority)
         self.queue_fetch_all_extended_data(anime_id).await?;
+
+        Ok(())
+    }
+
+    /// Queue a task to fetch videos for an anime
+    pub async fn queue_fetch_videos(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchVideosTask::new(
+            anime_id,
+            self.jikan_client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch videos task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue a task to fetch statistics for an anime
+    pub async fn queue_fetch_statistics(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchStatisticsTask::new(
+            anime_id,
+            self.jikan_client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch statistics task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue a task to fetch more info for an anime
+    pub async fn queue_fetch_more_info(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchMoreInfoTask::new(
+            anime_id,
+            self.jikan_client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch more info task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue a task to fetch recommendations for an anime
+    pub async fn queue_fetch_recommendations(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchRecommendationsTask::new(
+            anime_id,
+            self.jikan_client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch recommendations task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue a task to fetch pictures for an anime
+    pub async fn queue_fetch_pictures(&self, anime_id: u32) -> Result<(), AppError> {
+        let task = FetchPicturesTask::new(
+            anime_id,
+            self.jikan_client.clone(),
+        );
+
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing fetch pictures task"
+        );
+
+        self.queue.enqueue(Box::new(task)).await
+    }
+
+    /// Queue all extended data tasks for an anime (updated version)
+    pub async fn queue_fetch_all_extended_data(&self, anime_id: u32) -> Result<(), AppError> {
+        info!(
+            module = "my_anime_list",
+            anime_id = anime_id,
+            "Queueing all extended data tasks"
+        );
+
+        self.queue_fetch_characters(anime_id).await?;
+        self.queue_fetch_staff(anime_id).await?;
+        self.queue_fetch_episodes(anime_id).await?;
+        self.queue_fetch_videos(anime_id).await?;
+        self.queue_fetch_statistics(anime_id).await?;
+        self.queue_fetch_more_info(anime_id).await?;
+        self.queue_fetch_recommendations(anime_id).await?;
+        self.queue_fetch_pictures(anime_id).await?;
 
         Ok(())
     }

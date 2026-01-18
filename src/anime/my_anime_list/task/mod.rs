@@ -13,4 +13,9 @@ pub use fetch_extended::{
     FetchCharactersTask,
     FetchStaffTask,
     FetchEpisodesTask,
+    FetchVideosTask,        // NEW
+    FetchStatisticsTask,    // NEW
+    FetchMoreInfoTask,      // NEW
+    FetchRecommendationsTask, // NEW
+    FetchPicturesTask,      // NEW
 };
