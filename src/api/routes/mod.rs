@@ -24,6 +24,9 @@ pub fn create_router(state: ApiState) -> Router {
         .route("/api/anime/extended", post(anime::fetch_extended_data))
         .route("/api/anime/{id}", get(anime::get_anime))
         
+        .route("/api/anime/anilist/fetch", post(anime::fetch_from_anilist))
+        // .route("/api/anime/anilist/search", post(anime::search_anilist))
+
         // Picture routes
         .route("/api/picture/fetch", post(picture::fetch_picture))
         .route("/api/picture/batch", post(picture::batch_fetch))

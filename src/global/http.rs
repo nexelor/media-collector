@@ -20,7 +20,7 @@ struct ClientPool {
     default: ClientWithLimiter,
     my_anime_list: ClientWithLimiter,
     jikan: ClientWithLimiter,
-    // Add more API-specific clients here
+    anilist: ClientWithLimiter,
 }
 
 #[derive(Clone)]
@@ -116,6 +116,14 @@ impl HttpClientManager {
             .build()
             .expect("Failed to create Jikan HTTP client");
 
+        // Create AniList client
+        let anilist_rate_limit = config.get_rate_limit("anilist");
+        let anilist_client = Client::builder()
+            .timeout(Duration::from_secs(config.http.timeout_seconds))
+            .user_agent(&config.http.user_agent)
+            .build()
+            .expect("Failed to create AniList HTTP client");
+
         Self {
             clients: Arc::new(ClientPool {
                 default: ClientWithLimiter {
@@ -132,6 +140,11 @@ impl HttpClientManager {
                     client: jikan_client,
                     limiter: RateLimiter::new("jikan", jikan_rate_limit),
                     name: "jikan".to_string(),
+                },
+                anilist: ClientWithLimiter {
+                    client: anilist_client,
+                    limiter: RateLimiter::new("anilist", anilist_rate_limit),
+                    name: "anilist".to_string(),
                 },
             }),
             config,
@@ -151,6 +164,11 @@ impl HttpClientManager {
     /// Get the Jikan HTTP client with rate limiter
     pub fn jikan(&self) -> &ClientWithLimiter {
         &self.clients.jikan
+    }
+
+    /// Get the AniList HTTP client with rate limiter
+    pub fn anilist(&self) -> &ClientWithLimiter {
+        &self.clients.anilist
     }
 }
 
@@ -312,8 +330,20 @@ impl ClientWithLimiter {
 
     /// Deserialize the response body to type T
     async fn deserialize_response<T: DeserializeOwned>(&self, response: Response) -> Result<T, HttpError> {
-        response.json::<T>().await.map_err(|e| {
-            error!(client = %self.name, error = %e, "Failed to deserialize JSON response");
+        let body = response.text().await.map_err(|e| {
+            error!(client = %self.name, error = %e, "Failed to read response body");
+            HttpError::DeserializationFailed(e.to_string())
+        })?;
+
+        debug!(body = %body, "debug response body");
+
+        serde_json::from_str::<T>(&body).map_err(|e| {
+            error!(
+                client = %self.name,
+                error = %e,
+                body = %body,
+                "Failed to deserialize JSON response"
+            );
             HttpError::DeserializationFailed(e.to_string())
         })
     }

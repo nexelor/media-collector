@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 
-use crate::api::state::ApiState;
+use crate::{anime::anilist::AniListModule, api::state::ApiState};
 use crate::anime::my_anime_list;
 
 // ========================================================================
@@ -54,6 +54,12 @@ pub struct FetchExtendedDataRequest {
     pub fetch_staff: bool,
     #[serde(default)]
     pub fetch_episodes: bool,
+    #[serde(default)]
+    pub fetch_moreinfo: bool,
+    #[serde(default)]
+    pub fetch_videos: bool,
+    #[serde(default)]
+    pub fetch_recommendations: bool,
 }
 
 #[derive(Serialize)]
@@ -318,7 +324,7 @@ pub async fn batch_fetch(
 
 /// Fetch extended data (characters, staff, episodes)
 /// POST /api/anime/extended
-/// Body: { "anime_id": 1, "fetch_characters": true, "fetch_staff": true, "fetch_episodes": true }
+/// Body: { "anime_id": 1, "fetch_characters": true, "fetch_staff": true, "fetch_episodes": true, "fetch_moreinfo": true, "fetch_videos": true, "fetch_recommendations": true }
 pub async fn fetch_extended_data(
     State(state): State<ApiState>,
     Json(request): Json<FetchExtendedDataRequest>,
@@ -328,6 +334,9 @@ pub async fn fetch_extended_data(
         characters = request.fetch_characters,
         staff = request.fetch_staff,
         episodes = request.fetch_episodes,
+        videos = request.fetch_videos,
+        moreinfo = request.fetch_moreinfo,
+        recommendations = request.fetch_recommendations,
         "API request: fetch extended data"
     );
 
@@ -402,6 +411,48 @@ pub async fn fetch_extended_data(
         tasks_queued.push("episodes");
     }
 
+    if request.fetch_videos {
+        mal_module.queue_fetch_videos(request.anime_id).await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue videos task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue videos: {}", e),
+                    })
+                )
+            })?;
+        tasks_queued.push("videos");
+    }
+
+    if request.fetch_moreinfo {
+        mal_module.queue_fetch_more_info(request.anime_id).await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue moreinfo task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue moreinfo: {}", e),
+                    })
+                )
+            })?;
+        tasks_queued.push("moreinfo");
+    }
+
+    if request.fetch_recommendations {
+        mal_module.queue_fetch_recommendations(request.anime_id).await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue recommendations task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue recommendations: {}", e),
+                    })
+                )
+            })?;
+        tasks_queued.push("recommendations");
+    }
+
     if tasks_queued.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -446,4 +497,57 @@ pub async fn get_anime(
         })?;
 
     Ok(Json(AnimeResponse { anime }))
+}
+
+/// Fetch anime from AniList by MAL ID
+/// POST /api/anime/anilist/fetch-by-mal
+/// Body: { "mal_id": 1 }
+pub async fn fetch_from_anilist(
+    State(state): State<ApiState>,
+    Json(request): Json<FetchAnimeRequest>,
+) -> Result<Json<TaskQueuedResponse>, (StatusCode, Json<ErrorResponse>)> {
+    info!(mal_id = request.anime_id, "API request: fetch anime from AniList");
+
+    let anime_module = state.anime_module.as_ref()
+        .ok_or_else(|| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ErrorResponse {
+                    error: "Anime module is not enabled".to_string(),
+                })
+            )
+        })?;
+
+    let anilist_client = state.http_manager.anilist().clone();
+    
+    let anilist_module = AniListModule::new(
+        anilist_client,
+        state.config.clone(),
+        anime_module.queue().clone(),
+    ).ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "AniList module is not properly configured".to_string(),
+            })
+        )
+    })?;
+
+    anilist_module
+        .queue_fetch_by_mal_id(request.anime_id)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to queue AniList fetch task");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("Failed to queue task: {}", e),
+                })
+            )
+        })?;
+
+    Ok(Json(TaskQueuedResponse {
+        message: format!("Anime {} queued for fetching from AniList", request.anime_id),
+        task_type: "fetch_anime_anilist".to_string(),
+    }))
 }

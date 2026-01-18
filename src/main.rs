@@ -45,6 +45,11 @@ async fn main() -> Result<()> {
             info!("Initializing MyAnimeList database collections");
             anime::my_anime_list::database::initialize_collections(db.db()).await?;
         }
+
+        if anime::anilist::module::AniListModule::is_available(&config) {
+            info!("Initializing AniList database collections");
+            anime::anilist::database::initialize_collections(db.db()).await?;
+        }
     }
 
     // Spawn database maintenance task
