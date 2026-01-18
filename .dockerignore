@@ -1,0 +1,40 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Logs and data
+logs/
+*.log
+pictures/
+
+# Config (will be mounted)
+config.toml
+
+# Documentation
+README.md
+LICENSE
+
+# Old source
+src-old/
+
+# OS
+.DS_Store
+Thumbs.db

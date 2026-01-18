@@ -25,19 +25,19 @@ enabled = false
 # Child Modules Configuration - Anime
 [child_modules.my_anime_list]
 enabled = true
-rate_limit = 2.0  # requests per second
+rate_limit = 0.5  # requests per second
 api_key = "YOUR_MAL_API_KEY_HERE"  # Required! Get from: https://myanimelist.net/apiconfig
 requires_api_key = true
 
 [child_modules.jikan]
 enabled = true
-rate_limit = 2.0  # requests per second (same as MAL to respect both APIs)
+rate_limit = 0.5  # requests per second (same as MAL to respect both APIs)
 api_key = ""  # Jikan doesn't require API key
 requires_api_key = false
 
 [child_modules.anilist]
 enabled = false
-rate_limit = 90.0  # AniList allows 90 requests per minute = 1.5/sec
+rate_limit = 1.25  # AniList allows 90 requests per minute = 1.5/sec
 api_key = ""  # Optional - AniList doesn't require API key for basic queries
 requires_api_key = false
 

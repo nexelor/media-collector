@@ -29,3 +29,5 @@ axum = "0.8.8"
 tower = "0.5.3"
 tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 hyper = "1.8"
+regex = "1.10"
+serde_with = "3"

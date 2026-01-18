@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:8.0.15-noble
+    container_name: media-collector-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: media_collector
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    networks:
+      - media-collector-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  media-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: media-collector-app
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    volumes:
+      # Configuration file
+      - ./config.toml:/app/config.toml:ro
+      
+      # Pictures storage
+      - pictures_data:/app/pictures
+      
+      # Logs
+      - logs_data:/app/logs
+    networks:
+      - media-collector-network
+    environment:
+      # Optional: Override log level
+      RUST_LOG: info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  media-collector-network:
+    driver: bridge
+
+volumes:
+  # MongoDB data persistence
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+  
+  # Application data persistence
+  pictures_data:
+    driver: local
+  logs_data:
+    driver: local
