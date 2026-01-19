@@ -301,64 +301,92 @@ impl Task for FetchAnimePicturesTask {
             // Promo video images
             for (idx, promo) in videos.promo.iter().enumerate() {
                 if let Some(images) = &promo.trailer.images {
-                    self.queue_image(
+                    // Tags format: ["anime", "123", "video_promo", "video_promo_jpg_0"]
+                    let tags = vec![
+                        "anime".to_string(),
+                        self.anime_id.to_string(),
+                        "video_promo".to_string(),
+                        format!("video_promo_jpg_{}", idx),  // Used to extract video ID
+                    ];
+                    
+                    self.queue_image_with_custom_tags(
                         &images.jpg,
-                        idx.try_into().unwrap(),
-                        "video_promo",
+                        self.anime_id as i32,
                         "anime",
-                        Some(&format!("jpg_{}", idx))
+                        tags.clone(),
                     ).await?;
+
+                    // WebP version
+                    let mut webp_tags = tags.clone();
+                    webp_tags[3] = format!("video_promo_webp_{}", idx);
                     
-                    self.queue_image(
+                    self.queue_image_with_custom_tags(
                         &images.webp,
-                        idx.try_into().unwrap(),
-                        "video_promo",
+                        self.anime_id as i32,
                         "anime",
-                        Some(&format!("webp_{}", idx))
+                        webp_tags,
                     ).await?;
-                    
+
                     total_queued += 2;
                 }
             }
             
-            // Episode video images
+            // Episode video images - stored under anime/{id}/videos/{episode_mal_id}/
             for episode in &videos.episodes {
-                self.queue_image(
+                let tags = vec![
+                    "anime".to_string(),
+                    self.anime_id.to_string(),
+                    "video_episode".to_string(),
+                    format!("video_episode_jpg_{}", episode.mal_id),  // MAL ID used for directory
+                ];
+                
+                self.queue_image_with_custom_tags(
                     &episode.images.jpg,
-                    episode.mal_id,
-                    "video_episode",
+                    self.anime_id as i32,
                     "anime",
-                    Some(&format!("jpg_{}", episode.mal_id))
+                    tags.clone(),
                 ).await?;
                 
-                self.queue_image(
+                // WebP version
+                let mut webp_tags = tags.clone();
+                webp_tags[3] = format!("video_episode_webp_{}", episode.mal_id);
+                
+                self.queue_image_with_custom_tags(
                     &episode.images.webp,
-                    episode.mal_id,
-                    "video_episode",
+                    self.anime_id as i32,
                     "anime",
-                    Some(&format!("webp_{}", episode.mal_id))
+                    webp_tags,
                 ).await?;
                 
                 total_queued += 2;
             }
             
-            // Music video images
+            // Music video images - stored under anime/{id}/videos/{music_index}/
             for (idx, music) in videos.music_videos.iter().enumerate() {
                 if let Some(images) = &music.video.images {
-                    self.queue_image(
+                    let tags = vec![
+                        "anime".to_string(),
+                        self.anime_id.to_string(),
+                        "video_music".to_string(),
+                        format!("video_music_jpg_{}", idx),
+                    ];
+                    
+                    self.queue_image_with_custom_tags(
                         &images.jpg,
-                        idx.try_into().unwrap(),
-                        "video_music",
+                        self.anime_id as i32,
                         "anime",
-                        Some(&format!("jpg_{}", idx))
+                        tags.clone(),
                     ).await?;
                     
-                    self.queue_image(
+                    // WebP version
+                    let mut webp_tags = tags.clone();
+                    webp_tags[3] = format!("video_music_webp_{}", idx);
+                    
+                    self.queue_image_with_custom_tags(
                         &images.webp,
-                        idx.try_into().unwrap(),
-                        "video_music",
+                        self.anime_id as i32,
                         "anime",
-                        Some(&format!("webp_{}", idx))
+                        webp_tags,
                     ).await?;
                     
                     total_queued += 2;
@@ -398,6 +426,28 @@ impl Task for FetchAnimePicturesTask {
             "All anime pictures queued successfully"
         );
 
+        Ok(())
+    }
+}
+
+impl FetchAnimePicturesTask {
+    // Helper method to queue images with custom tags
+    async fn queue_image_with_custom_tags(
+        &self,
+        image: &Image,
+        entity_id: i32,
+        entity_type: &str,
+        tags: Vec<String>,
+    ) -> Result<(), AppError> {
+        if !image.image_url.is_empty() {
+            self.picture_module.queue_fetch_picture_for_entity(
+                image.image_url.clone(),
+                None,
+                entity_type.to_string(),
+                entity_id.to_string(),
+                tags,
+            ).await?;
+        }
         Ok(())
     }
 }

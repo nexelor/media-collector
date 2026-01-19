@@ -338,6 +338,16 @@ pub async fn batch_fetch(
         "API request: batch fetch anime"
     );
 
+    // Validate request
+    if request.anime_ids.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "No anime IDs provided".to_string(),
+            })
+        ));
+    }
+
     let anime_module = state.anime_module.as_ref()
         .ok_or_else(|| {
             (
@@ -348,10 +358,11 @@ pub async fn batch_fetch(
             )
         })?;
 
+    // Create MAL module
     let mal_client = state.http_manager.my_anime_list().clone();
     let jikan_client = state.http_manager.jikan().clone();
     
-    let mal_module = my_anime_list::module::MyAnimeListModule::new(
+    let mut mal_module = my_anime_list::module::MyAnimeListModule::new(
         mal_client,
         jikan_client,
         state.config.clone(),
@@ -365,8 +376,23 @@ pub async fn batch_fetch(
         )
     })?;
 
+    // Add picture module if available and requested
+    if request.with_pictures || request.full_fetch {
+        if let Some(picture_module) = &state.picture_module {
+            mal_module = mal_module.with_picture_module(picture_module.clone());
+        } else {
+            info!("Picture module not available, fetching without pictures");
+        }
+    }
+
+    // Queue the batch fetch
     mal_module
-        .queue_batch_fetch(request.anime_ids.clone(), request.with_jikan, request.with_pictures, request.full_fetch)
+        .queue_batch_fetch(
+            request.anime_ids.clone(),
+            request.with_jikan,
+            request.with_pictures,
+            request.full_fetch,
+        )
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to queue batch fetch task");
@@ -378,8 +404,30 @@ pub async fn batch_fetch(
             )
         })?;
 
+    // Build response message
+    let features = if request.full_fetch {
+        "full_fetch: true (includes everything)".to_string()
+    } else {
+        let mut parts = Vec::new();
+        if request.with_jikan {
+            parts.push("with_jikan");
+        }
+        if request.with_pictures {
+            parts.push("with_pictures");
+        }
+        if parts.is_empty() {
+            "basic fetch".to_string()
+        } else {
+            parts.join(", ")
+        }
+    };
+
     Ok(Json(TaskQueuedResponse {
-        message: format!("{} anime queued for batch fetching", request.anime_ids.len()),
+        message: format!(
+            "{} anime queued for batch fetching ({})",
+            request.anime_ids.len(),
+            features
+        ),
         task_type: "batch_fetch".to_string(),
     }))
 }

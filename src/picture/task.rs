@@ -115,19 +115,32 @@ impl FetchPictureTask {
         if let Some(entity_type) = &self.entity_type {
             path.push(entity_type);
             
-            // Add entity ID folder
+            // Add entity ID folder (anime ID, manga ID, etc.)
             if let Some(entity_id) = &self.entity_id {
                 path.push(entity_id);
                 
-                // Add category folder based on tags
+                // Video thumbnails go under anime/{anime_id}/videos/{video_id}/
                 if self.tags.contains(&"video_promo".to_string()) {
-                    path.push("videos/promo");
+                    path.push("videos");
+                    path.push("promos");
+                    // Extract video ID from tags (format: "video_promo_123")
+                    if let Some(video_id) = self.extract_video_id_from_tags("video_promo") {
+                        path.push(video_id);
+                    }
                 } else if self.tags.contains(&"video_episode".to_string()) {
-                    path.push("videos/episodes");
+                    path.push("videos");
+                    path.push("episodes");
+                    // Extract episode MAL ID from tags
+                    if let Some(video_id) = self.extract_video_id_from_tags("video_episode") {
+                        path.push(video_id);
+                    }
                 } else if self.tags.contains(&"video_music".to_string()) {
-                    path.push("videos/music");
-                // } else if self.tags.contains(&"recommendation".to_string()) {
-                //     path.push("recommendations");
+                    path.push("videos");
+                    path.push("music");
+                    // Extract music video ID from tags
+                    if let Some(video_id) = self.extract_video_id_from_tags("video_music") {
+                        path.push(video_id);
+                    }
                 } else if self.tags.contains(&"picture".to_string()) {
                     path.push("pictures");
                 } else if self.tags.contains(&"banner".to_string()) {
@@ -199,6 +212,24 @@ impl FetchPictureTask {
             "svg" => Some("image/svg+xml".to_string()),
             _ => None,
         }
+    }
+
+    /// Extract video ID from tags
+    /// For video_episode: extract the MAL episode ID
+    /// For video_promo/video_music: extract the index or ID
+    fn extract_video_id_from_tags(&self, video_type: &str) -> Option<String> {
+        for tag in &self.tags {
+            if tag.starts_with(video_type) {
+                let parts: Vec<&str> = tag.split('_').collect();
+                // For "video_episode_jpg_12345" -> "12345"
+                // For "video_promo_jpg_0" -> "0"
+                if parts.len() >= 3 {
+                    // Get the last part which should be the ID
+                    return parts.last().map(|s| s.to_string());
+                }
+            }
+        }
+        None
     }
 }
 
