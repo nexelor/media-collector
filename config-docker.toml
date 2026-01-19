@@ -1,0 +1,76 @@
+# Media Collector Configuration for Docker
+# Copy this to config.toml and update with your API keys
+
+[app]
+log_level = "info"
+
+[app.logging]
+log_to_file = true
+log_directory = "/app/logs"
+log_file_prefix = "media-collector"
+log_rotation = "daily"
+log_to_console = true
+
+[api]
+enabled = true
+host = "0.0.0.0"
+port = 3000
+
+[database]
+# Use the MongoDB container service name
+host = "mongodb"
+port = 27017
+name = "media_collector"
+
+# Parent Modules Configuration
+[modules.anime]
+enabled = true
+
+[modules.manga]
+enabled = false
+
+# Child Modules Configuration - Anime
+[child_modules.my_anime_list]
+enabled = true
+rate_limit = 2.0
+api_key = "4c88492f0f5cebd9d7cfdd640de1370e"  # Required! Get from: https://myanimelist.net/apiconfig
+requires_api_key = true
+
+[child_modules.jikan]
+enabled = true
+rate_limit = 2.0
+api_key = ""
+requires_api_key = false
+
+[child_modules.anilist]
+enabled = false
+rate_limit = 90.0
+api_key = ""
+requires_api_key = false
+
+[child_modules.kitsu]
+enabled = false
+rate_limit = 10.0
+api_key = ""
+
+# Child Modules Configuration - Manga
+[child_modules.manga_updates]
+enabled = false
+rate_limit = 5.0
+api_key = ""
+
+[child_modules.mangadex]
+enabled = false
+rate_limit = 5.0
+api_key = ""
+
+# HTTP Client Settings
+[http]
+timeout_seconds = 30
+user_agent = "media-collector/0.1.0"
+default_rate_limit = 10.0
+
+[http.retry]
+max_retries = 3
+base_delay_ms = 1000
+max_delay_ms = 60000

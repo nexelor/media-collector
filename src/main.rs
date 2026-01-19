@@ -52,6 +52,10 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Initialize picture tracking collections
+    info!("Initializing picture tracking database collections");
+    picture::database::initialize_collections(db.db()).await?;
+
     // Spawn database maintenance task
     let db_clone = db.clone();
     tokio::spawn(async move {

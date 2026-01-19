@@ -18,6 +18,8 @@ pub struct FetchAnimeRequest {
     pub anime_id: u32,
     #[serde(default)]
     pub with_jikan: bool,
+    #[serde(default)]
+    pub with_pictures: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +94,7 @@ pub async fn fetch_anime(
     info!(
         anime_id = request.anime_id,
         with_jikan = request.with_jikan,
+        with_pictures = request.with_pictures,
         "API request: fetch anime"
     );
 
@@ -110,7 +113,7 @@ pub async fn fetch_anime(
     let mal_client = state.http_manager.my_anime_list().clone();
     let jikan_client = state.http_manager.jikan().clone();
     
-    let mal_module = my_anime_list::module::MyAnimeListModule::new(
+    let mut mal_module = my_anime_list::module::MyAnimeListModule::new(
         mal_client,
         jikan_client,
         state.config.clone(),
@@ -125,19 +128,43 @@ pub async fn fetch_anime(
         )
     })?;
 
+    // Add picture module if available and requested
+    if request.with_pictures {
+        if let Some(picture_module) = &state.picture_module {
+            mal_module = mal_module.with_picture_module(picture_module.clone());
+        } else {
+            info!("Picture module not available, fetching without pictures");
+        }
+    }
+
     // Queue the task
-    mal_module
-        .queue_fetch_anime(request.anime_id, request.with_jikan)
-        .await
-        .map_err(|e| {
-            error!(error = %e, "Failed to queue fetch anime task");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to queue task: {}", e),
-                })
-            )
-        })?;
+    if request.with_pictures {
+        mal_module
+            .queue_fetch_anime_with_pictures(request.anime_id, request.with_jikan)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue fetch anime task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue task: {}", e),
+                    })
+                )
+            })?;
+    } else {
+        mal_module
+            .queue_fetch_anime(request.anime_id, request.with_jikan)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue fetch anime task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue task: {}", e),
+                    })
+                )
+            })?;
+    }
 
     Ok(Json(TaskQueuedResponse {
         message: format!("Anime {} queued for fetching", request.anime_id),
@@ -506,7 +533,11 @@ pub async fn fetch_from_anilist(
     State(state): State<ApiState>,
     Json(request): Json<FetchAnimeRequest>,
 ) -> Result<Json<TaskQueuedResponse>, (StatusCode, Json<ErrorResponse>)> {
-    info!(mal_id = request.anime_id, "API request: fetch anime from AniList");
+    info!(
+        mal_id = request.anime_id,
+        with_pictures = request.with_pictures,
+        "API request: fetch anime from AniList"
+    );
 
     let anime_module = state.anime_module.as_ref()
         .ok_or_else(|| {
@@ -520,7 +551,7 @@ pub async fn fetch_from_anilist(
 
     let anilist_client = state.http_manager.anilist().clone();
     
-    let anilist_module = AniListModule::new(
+    let mut anilist_module = AniListModule::new(
         anilist_client,
         state.config.clone(),
         anime_module.queue().clone(),
@@ -532,19 +563,41 @@ pub async fn fetch_from_anilist(
             })
         )
     })?;
+    
+    // Add picture module if available and requested
+    if request.with_pictures {
+        if let Some(picture_module) = &state.picture_module {
+            anilist_module = anilist_module.with_picture_module(picture_module.clone());
+        }
+    }
 
-    anilist_module
-        .queue_fetch_by_mal_id(request.anime_id)
-        .await
-        .map_err(|e| {
-            error!(error = %e, "Failed to queue AniList fetch task");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("Failed to queue task: {}", e),
-                })
-            )
-        })?;
+    if request.with_pictures {
+        anilist_module
+            .queue_fetch_by_mal_id_with_pictures(request.anime_id)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue AniList fetch task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue task: {}", e),
+                    })
+                )
+            })?;
+    } else {
+        anilist_module
+            .queue_fetch_by_mal_id(request.anime_id)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue AniList fetch task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue task: {}", e),
+                    })
+                )
+            })?;
+    }
 
     Ok(Json(TaskQueuedResponse {
         message: format!("Anime {} queued for fetching from AniList", request.anime_id),

@@ -1,4 +1,3 @@
-// src/anime/anilist/database.rs
 use anyhow::Result;
 use mongodb::{Database, IndexModel};
 use mongodb::options::{FindOptions, IndexOptions, ReplaceOptions};

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
-use tracing::{info, debug};
+use tracing::{debug, info, warn};
 
 use crate::anime::anilist::database::upsert_anime;
 use crate::global::queue::{TaskData, TaskPriority, TaskStatus};
@@ -20,6 +20,7 @@ use crate::anime::anilist::{
 pub struct FetchAnimePayload {
     pub mal_id: Option<u32>,
     pub anilist_id: Option<u32>,
+    pub with_pictures: bool,
 }
 
 /// Task to fetch anime data from AniList API
@@ -29,6 +30,10 @@ pub struct FetchAnimeTask {
     anilist_id: Option<u32>,
     client: crate::global::http::ClientWithLimiter,
     created_at: chrono::DateTime<chrono::Utc>,
+    /// Whether to queue picture downloads after fetching
+    with_pictures: bool,
+    /// Optional picture module reference
+    picture_module: Option<Arc<crate::picture::PictureFetcherModule>>,
 }
 
 impl FetchAnimeTask {
@@ -44,6 +49,8 @@ impl FetchAnimeTask {
             anilist_id: None,
             client,
             created_at: chrono::Utc::now(),
+            with_pictures: false,
+            picture_module: None,
         }
     }
 
@@ -59,7 +66,16 @@ impl FetchAnimeTask {
             anilist_id: Some(anilist_id),
             client,
             created_at: chrono::Utc::now(),
+            with_pictures: false,
+            picture_module: None,
         }
+    }
+
+    /// Enable picture downloads
+    pub fn with_pictures(mut self, picture_module: Arc<crate::picture::PictureFetcherModule>) -> Self {
+        self.with_pictures = true;
+        self.picture_module = Some(picture_module);
+        self
     }
 }
 
@@ -81,6 +97,7 @@ impl Task for FetchAnimeTask {
         let payload = FetchAnimePayload {
             mal_id: self.mal_id,
             anilist_id: self.anilist_id,
+            with_pictures: self.with_pictures,
         };
 
         TaskData {
@@ -98,6 +115,7 @@ impl Task for FetchAnimeTask {
             task = %self.name(),
             mal_id = ?self.mal_id,
             anilist_id = ?self.anilist_id,
+            with_pictures = self.with_pictures,
             "Fetching anime from AniList API"
         );
 
@@ -159,6 +177,7 @@ impl Task for FetchAnimeTask {
             .ok_or_else(|| AppError::Module("No data returned from AniList".to_string()))?;
 
         let anilist_media = media_data.media;
+        let fetched_anilist_id = anilist_media.id;
 
         info!(
             task = %self.name(),
@@ -183,6 +202,37 @@ impl Task for FetchAnimeTask {
             "Anime stored successfully in anime_anilist collection"
         );
 
+        // Optionally queue picture downloads
+        if self.with_pictures {
+            if let Some(picture_module) = &self.picture_module {
+                info!(
+                    task = %self.name(),
+                    anilist_id = fetched_anilist_id,
+                    "Queueing picture downloads for AniList anime"
+                );
+                
+                let picture_task = super::fetch_pictures_for_anime::FetchAniListAnimePicturesTask::new(
+                    fetched_anilist_id as u32,
+                    picture_module.clone(),
+                );
+                
+                // Queue the picture task
+                picture_module.queue().enqueue(Box::new(picture_task)).await?;
+                
+                info!(
+                    task = %self.name(),
+                    anilist_id = fetched_anilist_id,
+                    "Picture download task queued"
+                );
+            } else {
+                warn!(
+                    task = %self.name(),
+                    anilist_id = fetched_anilist_id,
+                    "Picture module not available, skipping picture downloads"
+                );
+            }
+        }
+        
         Ok(())
     }
 }

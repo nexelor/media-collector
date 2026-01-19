@@ -19,6 +19,7 @@ use crate::anime::my_anime_list::{
 pub struct FetchAnimePayload {
     pub anime_id: u32,
     pub with_jikan: bool,
+    pub with_pictures: bool,
 }
 
 /// Task to fetch anime data from MyAnimeList API
@@ -31,6 +32,10 @@ pub struct FetchAnimeTask {
     created_at: chrono::DateTime<chrono::Utc>,
     /// Whether to also fetch Jikan data for enrichment
     with_jikan: bool,
+    /// Whether to queue picture downloads after fetching
+    with_pictures: bool,
+    /// Optional picture module reference
+    picture_module: Option<Arc<crate::picture::PictureFetcherModule>>,
 }
 
 impl FetchAnimeTask {
@@ -40,7 +45,7 @@ impl FetchAnimeTask {
         mal_client: crate::global::http::ClientWithLimiter,
         jikan_client: crate::global::http::ClientWithLimiter,
     ) -> Self {
-        let id = format!("mal_search_{}", uuid::Uuid::new_v4());
+        let id = format!("mal_fetch_{}", uuid::Uuid::new_v4());
         Self {
             id,
             anime_id,
@@ -49,12 +54,21 @@ impl FetchAnimeTask {
             jikan_client,
             created_at: chrono::Utc::now(),
             with_jikan: false,
+            with_pictures: false,
+            picture_module: None,
         }
     }
 
     /// Create a fetch task that also fetches Jikan data for enrichment
     pub fn with_jikan(mut self) -> Self {
         self.with_jikan = true;
+        self
+    }
+
+    /// Create a fetch task that also downloads pictures
+    pub fn with_pictures(mut self, picture_module: Arc<crate::picture::PictureFetcherModule>) -> Self {
+        self.with_pictures = true;
+        self.picture_module = Some(picture_module);
         self
     }
 }
@@ -77,6 +91,7 @@ impl Task for FetchAnimeTask {
         let payload = FetchAnimePayload {
             anime_id:self.anime_id,
             with_jikan: self.with_jikan,
+            with_pictures: self.with_pictures,
         };
 
         TaskData {
@@ -94,6 +109,7 @@ impl Task for FetchAnimeTask {
             task = %self.name(),
             anime_id = self.anime_id,
             fetch_jikan = self.with_jikan,
+            fetch_pictures = self.with_pictures,
             "Fetching anime from MyAnimeList API"
         );
 
@@ -156,6 +172,37 @@ impl Task for FetchAnimeTask {
             "Anime stored successfully"
         );
 
+        // Step 4: Optionally queue picture downloads
+        if self.with_pictures {
+            if let Some(picture_module) = &self.picture_module {
+                info!(
+                    task = %self.name(),
+                    anime_id = self.anime_id,
+                    "Queueing picture downloads for anime"
+                );
+                
+                let picture_task = super::fetch_pictures_for_anime::FetchAnimePicturesTask::new(
+                    self.anime_id,
+                    picture_module.clone(),
+                );
+                
+                // Queue the picture task
+                picture_module.queue().enqueue(Box::new(picture_task)).await?;
+                
+                info!(
+                    task = %self.name(),
+                    anime_id = self.anime_id,
+                    "Picture download task queued"
+                );
+            } else {
+                warn!(
+                    task = %self.name(),
+                    anime_id = self.anime_id,
+                    "Picture module not available, skipping picture downloads"
+                );
+            }
+        }
+        
         Ok(())
     }
 }

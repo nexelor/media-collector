@@ -3,6 +3,7 @@ pub mod search_anime;
 pub mod update_anime;
 pub mod batch_fetch;
 pub mod fetch_extended;
+pub mod fetch_pictures_for_anime;
 
 // Re-export task types
 pub use fetch_anime::FetchAnimeTask;
@@ -19,3 +20,4 @@ pub use fetch_extended::{
     FetchRecommendationsTask, // NEW
     FetchPicturesTask,      // NEW
 };
+pub use fetch_pictures_for_anime::FetchAnimePicturesTask;

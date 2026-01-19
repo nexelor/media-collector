@@ -3,8 +3,7 @@ pub mod picture;
 pub mod health;
 
 use axum::{
-    routing::{get, post},
-    Router,
+    Router, routing::{delete, get, post}
 };
 
 use crate::api::state::ApiState;
@@ -25,11 +24,14 @@ pub fn create_router(state: ApiState) -> Router {
         .route("/api/anime/{id}", get(anime::get_anime))
         
         .route("/api/anime/anilist/fetch", post(anime::fetch_from_anilist))
-        // .route("/api/anime/anilist/search", post(anime::search_anilist))
 
         // Picture routes
         .route("/api/picture/fetch", post(picture::fetch_picture))
         .route("/api/picture/batch", post(picture::batch_fetch))
+        .route("/api/picture", get(picture::get_picture))
+        .route("/api/picture", delete(picture::delete_picture))
+        .route("/api/picture/list", get(picture::list_pictures))
+        .route("/api/picture/stats", get(picture::get_stats))
         
         .with_state(state)
 }

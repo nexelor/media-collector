@@ -3,8 +3,6 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::future::Future;
 use tokio::sync::mpsc;
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use tracing::{info, debug, warn, error};
 
 use crate::global::database::DatabaseInstance;
@@ -13,6 +11,8 @@ use crate::global::module::{ParentModule, ModuleMessage};
 use crate::global::queue::{QueueWorker, TaskQueue};
 
 pub mod task;
+pub mod model;
+pub mod database;
 
 #[derive(Clone)]
 pub struct PictureFetcherModule {
@@ -68,6 +68,42 @@ impl PictureFetcherModule {
         
         self.queue.enqueue(Box::new(task)).await
     }
+    
+    /// Queue a task to fetch a picture with tags
+    pub async fn queue_fetch_picture_with_tags(
+        &self,
+        url: String,
+        filename: Option<String>,
+        tags: Vec<String>,
+    ) -> Result<(), AppError> {
+        let task = task::FetchPictureTask::new(
+            url,
+            self.storage_path.clone(),
+            filename,
+        ).with_tags(tags);
+        
+        self.queue.enqueue(Box::new(task)).await
+    }
+    
+    /// Queue a task to fetch a picture associated with an entity
+    pub async fn queue_fetch_picture_for_entity(
+        &self,
+        url: String,
+        filename: Option<String>,
+        entity_type: String,
+        entity_id: String,
+        tags: Vec<String>,
+    ) -> Result<(), AppError> {
+        let task = task::FetchPictureTask::new(
+            url,
+            self.storage_path.clone(),
+            filename,
+        )
+        .with_entity(entity_type, entity_id)
+        .with_tags(tags);
+        
+        self.queue.enqueue(Box::new(task)).await
+    }
 
     /// Queue multiple pictures
     pub async fn queue_fetch_pictures(
@@ -88,7 +124,7 @@ impl ParentModule for PictureFetcherModule {
     
     fn run(
         &self,
-        _db: Arc<DatabaseInstance>,
+        db: Arc<DatabaseInstance>,
         mut rx: mpsc::Receiver<ModuleMessage>,
     ) -> Pin<Box<dyn Future<Output = Result<(), AppError>> + Send + '_>> {
         Box::pin(async move {
@@ -119,10 +155,27 @@ impl ParentModule for PictureFetcherModule {
                         }
                     }
                     
-                    // Periodic cleanup of old/orphaned files
-                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(3600)) => {
+                    // Periodic cleanup of old failed downloads (every 6 hours)
+                    _ = tokio::time::sleep(tokio::time::Duration::from_secs(21600)) => {
                         debug!(module = %self.name(), "Running periodic cleanup");
-                        // Add cleanup logic here if needed
+                        match database::cleanup_failed_pictures(db.db(), 7).await {
+                            Ok(deleted) => {
+                                if deleted > 0 {
+                                    info!(
+                                        module = %self.name(),
+                                        deleted = deleted,
+                                        "Cleaned up old failed picture records"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    module = %self.name(),
+                                    error = %e,
+                                    "Failed to cleanup old pictures"
+                                );
+                            }
+                        }
                     }
                 }
             }
