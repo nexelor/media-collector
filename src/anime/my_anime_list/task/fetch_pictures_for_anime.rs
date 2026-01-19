@@ -41,12 +41,14 @@ impl FetchAnimePicturesTask {
     async fn queue_image(
         &self,
         image: &Image,
+        entity_id: i32,
         category: &str,
+        entity_type: &str,
         sub_category: Option<&str>,
     ) -> Result<(), AppError> {
         let mut tags = vec![
-            "anime".to_string(),
-            self.anime_id.to_string(),
+            entity_type.to_string(),
+            entity_id.to_string(),
             category.to_string(),
         ];
         
@@ -59,6 +61,8 @@ impl FetchAnimePicturesTask {
             debug!(
                 anime_id = self.anime_id,
                 category = category,
+                entity_type = entity_type,
+                entity_id = entity_id,
                 url = %image.image_url,
                 "Queueing JPG image"
             );
@@ -66,8 +70,8 @@ impl FetchAnimePicturesTask {
             self.picture_module.queue_fetch_picture_for_entity(
                 image.image_url.clone(),
                 None,
-                "anime".to_string(),
-                self.anime_id.to_string(),
+                entity_type.to_string(),
+                entity_id.to_string(),
                 tags.clone(),
             ).await?;
         }
@@ -86,8 +90,8 @@ impl FetchAnimePicturesTask {
             self.picture_module.queue_fetch_picture_for_entity(
                 image.large_image_url.clone(),
                 None,
-                "anime".to_string(),
-                self.anime_id.to_string(),
+                entity_type.to_string(),
+                entity_id.to_string(),
                 tags.clone(),
             ).await?;
         }
@@ -110,8 +114,8 @@ impl FetchAnimePicturesTask {
             self.picture_module.queue_fetch_picture_for_entity(
                 image.small_image_url.clone(),
                 None,
-                "anime".to_string(),
-                self.anime_id.to_string(),
+                entity_type.to_string(),
+                entity_id.to_string(),
                 small_tags,
             ).await?;
         }
@@ -179,11 +183,11 @@ impl Task for FetchAnimePicturesTask {
         debug!(anime_id = self.anime_id, "Queueing main anime images");
         
         // JPG images
-        self.queue_image(&anime.images.jpg, "main", Some("jpg")).await?;
+        self.queue_image(&anime.images.jpg, self.anime_id as i32, "main", "anime", Some("jpg")).await?;
         total_queued += 1;
         
         // WebP images
-        self.queue_image(&anime.images.webp, "main", Some("webp")).await?;
+        self.queue_image(&anime.images.webp, self.anime_id as i32, "main", "anime", Some("webp")).await?;
         total_queued += 1;
 
         // 2. Additional pictures
@@ -195,9 +199,9 @@ impl Task for FetchAnimePicturesTask {
         
         for (idx, picture) in anime.pictures.iter().enumerate() {
             // JPG
-            self.queue_image(&picture.jpg, "picture", Some(&format!("jpg_{}", idx))).await?;
+            self.queue_image(&picture.jpg, self.anime_id as i32, "picture", "anime", Some(&format!("jpg_{}", idx))).await?;
             // WebP
-            self.queue_image(&picture.webp, "picture", Some(&format!("webp_{}", idx))).await?;
+            self.queue_image(&picture.webp, self.anime_id as i32, "picture", "anime", Some(&format!("webp_{}", idx))).await?;
             total_queued += 2;
         }
 
@@ -214,12 +218,16 @@ impl Task for FetchAnimePicturesTask {
             // Character image (JPG and WebP)
             self.queue_image(
                 &character.character.images.jpg,
+                character.character.mal_id,
+                "character",
                 "character",
                 Some(&format!("{}_jpg", character_tags_suffix))
             ).await?;
             
             self.queue_image(
                 &character.character.images.webp,
+                character.character.mal_id,
+                "character",
                 "character",
                 Some(&format!("{}_webp", character_tags_suffix))
             ).await?;
@@ -232,12 +240,16 @@ impl Task for FetchAnimePicturesTask {
                 
                 self.queue_image(
                     &va.person.images.jpg,
+                    va.person.mal_id,
+                    "voice_actor",
                     "voice_actor",
                     Some(&format!("{}_jpg", va_tags_suffix))
                 ).await?;
                 
                 self.queue_image(
                     &va.person.images.webp,
+                    va.person.mal_id,
+                    "voice_actor",
                     "voice_actor",
                     Some(&format!("{}_webp", va_tags_suffix))
                 ).await?;
@@ -259,12 +271,16 @@ impl Task for FetchAnimePicturesTask {
             // Staff image (JPG and WebP)
             self.queue_image(
                 &staff.person.images.jpg,
+                staff.person.mal_id,
+                "staff",
                 "staff",
                 Some(&format!("{}_jpg", staff_tags_suffix))
             ).await?;
             
             self.queue_image(
                 &staff.person.images.webp,
+                staff.person.mal_id,
+                "staff",
                 "staff",
                 Some(&format!("{}_webp", staff_tags_suffix))
             ).await?;
@@ -287,13 +303,17 @@ impl Task for FetchAnimePicturesTask {
                 if let Some(images) = &promo.trailer.images {
                     self.queue_image(
                         &images.jpg,
+                        idx.try_into().unwrap(),
                         "video_promo",
+                        "anime",
                         Some(&format!("jpg_{}", idx))
                     ).await?;
                     
                     self.queue_image(
                         &images.webp,
+                        idx.try_into().unwrap(),
                         "video_promo",
+                        "anime",
                         Some(&format!("webp_{}", idx))
                     ).await?;
                     
@@ -305,13 +325,17 @@ impl Task for FetchAnimePicturesTask {
             for episode in &videos.episodes {
                 self.queue_image(
                     &episode.images.jpg,
+                    episode.mal_id,
                     "video_episode",
+                    "anime",
                     Some(&format!("jpg_{}", episode.mal_id))
                 ).await?;
                 
                 self.queue_image(
                     &episode.images.webp,
+                    episode.mal_id,
                     "video_episode",
+                    "anime",
                     Some(&format!("webp_{}", episode.mal_id))
                 ).await?;
                 
@@ -323,13 +347,17 @@ impl Task for FetchAnimePicturesTask {
                 if let Some(images) = &music.video.images {
                     self.queue_image(
                         &images.jpg,
+                        idx.try_into().unwrap(),
                         "video_music",
+                        "anime",
                         Some(&format!("jpg_{}", idx))
                     ).await?;
                     
                     self.queue_image(
                         &images.webp,
+                        idx.try_into().unwrap(),
                         "video_music",
+                        "anime",
                         Some(&format!("webp_{}", idx))
                     ).await?;
                     
@@ -339,29 +367,29 @@ impl Task for FetchAnimePicturesTask {
         }
 
         // 6. Recommendation images
-        info!(
-            anime_id = self.anime_id,
-            count = anime.recommendations.len(),
-            "Queueing recommendation images"
-        );
+        // info!(
+        //     anime_id = self.anime_id,
+        //     count = anime.recommendations.len(),
+        //     "Queueing recommendation images"
+        // );
         
-        for recommendation in &anime.recommendations {
-            let rec_tags_suffix = format!("recommendation_{}", recommendation.entry.mal_id);
+        // for recommendation in &anime.recommendations {
+        //     let rec_tags_suffix = format!("recommendation_{}", recommendation.entry.mal_id);
             
-            self.queue_image(
-                &recommendation.entry.images.jpg,
-                "recommendation",
-                Some(&format!("{}_jpg", rec_tags_suffix))
-            ).await?;
+        //     self.queue_image(
+        //         &recommendation.entry.images.jpg,
+        //         "recommendation",
+        //         Some(&format!("{}_jpg", rec_tags_suffix))
+        //     ).await?;
             
-            self.queue_image(
-                &recommendation.entry.images.webp,
-                "recommendation",
-                Some(&format!("{}_webp", rec_tags_suffix))
-            ).await?;
+        //     self.queue_image(
+        //         &recommendation.entry.images.webp,
+        //         "recommendation",
+        //         Some(&format!("{}_webp", rec_tags_suffix))
+        //     ).await?;
             
-            total_queued += 2;
-        }
+        //     total_queued += 2;
+        // }
 
         info!(
             task = %self.name(),

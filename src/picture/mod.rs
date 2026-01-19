@@ -33,7 +33,7 @@ impl PictureFetcherModule {
             warn!(error = %e, path = ?storage_path, "Failed to create picture storage directory");
         }
         
-        let (queue, rx) = TaskQueue::new("picture_queue".to_string(), 1000);
+        let (queue, rx) = TaskQueue::new("picture_queue".to_string(), 4000);
         
         // Spawn the queue worker
         let worker = QueueWorker::new("picture_worker".to_string(), db, client);

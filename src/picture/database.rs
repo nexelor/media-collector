@@ -19,7 +19,7 @@ pub async fn initialize_collections(db: &Database) -> Result<(), DatabaseError> 
     
     // Unique index on URL
     let url_index = IndexModel::builder()
-        .keys(doc! { "url": 1 })
+        .keys(doc! { "url": 1, "entity_type": 1, "entity_id": 1 })
         .options(IndexOptions::builder().unique(true).build())
         .build();
     
@@ -38,11 +38,6 @@ pub async fn initialize_collections(db: &Database) -> Result<(), DatabaseError> 
         .keys(doc! { "content_hash": 1 })
         .build();
     
-    // Compound index on entity_type and entity_id
-    let entity_index = IndexModel::builder()
-        .keys(doc! { "entity_type": 1, "entity_id": 1 })
-        .build();
-    
     // Index on tags for filtering
     let tags_index = IndexModel::builder()
         .keys(doc! { "tags": 1 })
@@ -58,7 +53,6 @@ pub async fn initialize_collections(db: &Database) -> Result<(), DatabaseError> 
         path_index,
         status_index,
         hash_index,
-        entity_index,
         tags_index,
         created_index,
     ]).await
@@ -71,7 +65,7 @@ pub async fn initialize_collections(db: &Database) -> Result<(), DatabaseError> 
 /// Insert or update picture metadata
 pub async fn upsert_picture(db: &Database, picture: &PictureMetadata) -> Result<(), DatabaseError> {
     let collection = db.collection::<PictureMetadata>(COLLECTION_NAME);
-    let filter = doc! { "url": &picture.url };
+    let filter = doc! { "url": &picture.url, "entity_id": &picture.entity_id, "entity_type": &picture.entity_type };
     let options = ReplaceOptions::builder().upsert(true).build();
     
     collection.replace_one(filter, picture)
@@ -116,14 +110,28 @@ pub async fn get_picture_by_hash(db: &Database, hash: &str) -> Result<Option<Pic
 }
 
 /// Check if a picture URL already exists
-pub async fn picture_exists(db: &Database, url: &str) -> Result<bool, DatabaseError> {
+pub async fn picture_exists(db: &Database, url: &str, entity_id: Option<&str>, entity_type: Option<&str>) -> Result<bool, DatabaseError> {
     let collection = db.collection::<PictureMetadata>(COLLECTION_NAME);
-    let filter = doc! { "url": url };
+    let filter = doc! { "url": url, "entity_id": entity_id, "entity_type": entity_type };
     
     let count = collection.count_documents(filter).await
-        .map_err(|e| DatabaseError::Query(format!("Failed to check existence: {}", e)))?;
+        .map_err(|e| DatabaseError::Query(format!("Failed to check picture existence: {}", e)))?;
     
     Ok(count > 0)
+}
+
+pub async fn get_picture_metadata(db: &Database, url: &str, entity_id: Option<&str>, entity_type: Option<&str>) -> Result<Option<PictureMetadata>, DatabaseError> {
+    let collection = db.collection::<PictureMetadata>(COLLECTION_NAME);
+
+    let filter = doc! { "url": url, "entity_id": entity_id, "entity_type": entity_type };
+
+    collection
+        .find_one(filter)
+        .await
+        .map_err(|e| DatabaseError::Query(format!(
+            "Failed to get picture metadata: {}",
+            e
+        )))
 }
 
 /// Update picture status

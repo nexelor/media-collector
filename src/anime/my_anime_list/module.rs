@@ -196,12 +196,17 @@ impl MyAnimeListModule {
 
         // Queue individual fetch tasks for each anime
         for anime_id in anime_ids {
-            self.queue_fetch_anime_with_options(
-                anime_id,
-                with_jikan,
-                with_pictures,
-                full_fetch,
-            ).await?;
+            if full_fetch {
+                self.queue_fetch_anime_full(anime_id).await?;
+            }
+            else {
+                self.queue_fetch_anime_with_options(
+                    anime_id,
+                    with_jikan,
+                    with_pictures,
+                    full_fetch,
+                ).await?;
+            }
         }
 
         Ok(())

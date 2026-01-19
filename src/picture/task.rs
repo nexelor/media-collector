@@ -6,11 +6,11 @@ use tokio::io::AsyncWriteExt;
 use tracing::{info, debug, warn, error};
 use sha2::{Sha256, Digest};
 
-use crate::global::{
+use crate::{global::{
     database::DatabaseInstance,
     error::AppError,
-    queue::{Task, TaskPriority, TaskData, TaskStatus},
-};
+    queue::{Task, TaskData, TaskPriority, TaskStatus},
+}, picture::database::{get_picture_metadata, picture_exists}};
 use super::model::{PictureMetadata, PictureStatus};
 use super::database;
 
@@ -86,7 +86,32 @@ impl FetchPictureTask {
     fn build_directory_path(&self, base_path: &PathBuf) -> PathBuf {
         let mut path = base_path.clone();
         
-        // Add entity type folder (anime, manga, etc.)
+        // Check if this is a common entity type (shared across media)
+        let is_character = self.tags.contains(&"character".to_string());
+        let is_staff = self.tags.contains(&"staff".to_string());
+        let is_voice_actor = self.tags.contains(&"voice_actor".to_string());
+        
+        // For common entities, store in shared directories by their ID
+        if is_character || is_staff || is_voice_actor {
+            // Extract the entity ID from tags (format: "character_123", "staff_456", etc.)
+            let entity_id = self.extract_entity_id_from_tags();
+            
+            if let Some(id) = entity_id {
+                if is_character {
+                    path.push("characters");
+                    path.push(id);
+                } else if is_voice_actor {
+                    path.push("voice_actors");
+                    path.push(id);
+                } else if is_staff {
+                    path.push("staff");
+                    path.push(id);
+                }
+                return path;
+            }
+        }
+        
+        // For media-specific content, use the entity-based structure
         if let Some(entity_type) = &self.entity_type {
             path.push(entity_type);
             
@@ -95,20 +120,14 @@ impl FetchPictureTask {
                 path.push(entity_id);
                 
                 // Add category folder based on tags
-                if self.tags.contains(&"character".to_string()) {
-                    path.push("characters");
-                } else if self.tags.contains(&"staff".to_string()) {
-                    path.push("staff");
-                } else if self.tags.contains(&"voice_actor".to_string()) {
-                    path.push("voice_actors");
-                } else if self.tags.contains(&"video_promo".to_string()) {
+                if self.tags.contains(&"video_promo".to_string()) {
                     path.push("videos/promo");
                 } else if self.tags.contains(&"video_episode".to_string()) {
                     path.push("videos/episodes");
                 } else if self.tags.contains(&"video_music".to_string()) {
                     path.push("videos/music");
-                } else if self.tags.contains(&"recommendation".to_string()) {
-                    path.push("recommendations");
+                // } else if self.tags.contains(&"recommendation".to_string()) {
+                //     path.push("recommendations");
                 } else if self.tags.contains(&"picture".to_string()) {
                     path.push("pictures");
                 } else if self.tags.contains(&"banner".to_string()) {
@@ -120,6 +139,34 @@ impl FetchPictureTask {
         }
         
         path
+    }
+
+    /// Extract entity ID from tags like "character_123", "staff_456", "va_789_123"
+    fn extract_entity_id_from_tags(&self) -> Option<String> {
+        for tag in &self.tags {
+            // Handle character tags: "character_123_jpg" -> "123"
+            if tag.starts_with("character_") {
+                let parts: Vec<&str> = tag.split('_').collect();
+                if parts.len() >= 2 {
+                    return Some(parts[1].to_string());
+                }
+            }
+            // Handle staff tags: "staff_456_jpg" -> "456"
+            else if tag.starts_with("staff_") {
+                let parts: Vec<&str> = tag.split('_').collect();
+                if parts.len() >= 2 {
+                    return Some(parts[1].to_string());
+                }
+            }
+            // Handle voice actor tags: "va_123_456_jpg" -> "456" (second ID is the VA's ID)
+            else if tag.starts_with("va_") {
+                let parts: Vec<&str> = tag.split('_').collect();
+                if parts.len() >= 3 {
+                    return Some(parts[2].to_string());
+                }
+            }
+        }
+        None
     }
 
     /// Sanitize filename to prevent path traversal
@@ -220,17 +267,21 @@ impl Task for FetchPictureTask {
         metadata.status = PictureStatus::Downloading;
         
         // Check if picture already exists in database
-        if let Some(existing) = database::get_picture_by_url(db.db(), &self.url).await? {
-            if existing.is_completed() {
-                info!(
-                    task = %self.name(),
-                    url = %self.url,
-                    "Picture already downloaded, skipping"
-                );
-                return Ok(());
+        if picture_exists(db.db(), &self.url, self.entity_id.as_deref(), self.entity_type.as_deref()).await? {
+            if let Some(existing) = get_picture_metadata(db.db(), &self.url, self.entity_id.as_deref(), self.entity_type.as_deref()).await? {
+                if existing.is_completed() {
+                    info!(
+                        task = %self.name(),
+                        url = %self.url,
+                        entity_id = ?self.entity_id,
+                        entity_type = ?self.entity_type,
+                        "Picture already downloaded, skipping"
+                    );
+                    return Ok(());
+                }
+                // Update download attempts
+                metadata.download_attempts = existing.download_attempts + 1;
             }
-            // Update download attempts
-            metadata.download_attempts = existing.download_attempts + 1;
         }
         
         // Save initial metadata
