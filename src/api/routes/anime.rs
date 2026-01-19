@@ -20,6 +20,8 @@ pub struct FetchAnimeRequest {
     pub with_jikan: bool,
     #[serde(default)]
     pub with_pictures: bool,
+    #[serde(default)]
+    pub full_fetch: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +40,10 @@ pub struct UpdateAnimeRequest {
     pub anime_id: u32,
     #[serde(default)]
     pub with_jikan: bool,
+    #[serde(default)]
+    pub with_pictures: bool,
+    #[serde(default)]
+    pub full_fetch: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +51,10 @@ pub struct BatchFetchRequest {
     pub anime_ids: Vec<u32>,
     #[serde(default)]
     pub with_jikan: bool,
+    #[serde(default)]
+    pub with_pictures: bool,
+    #[serde(default)]
+    pub full_fetch: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +105,7 @@ pub async fn fetch_anime(
         anime_id = request.anime_id,
         with_jikan = request.with_jikan,
         with_pictures = request.with_pictures,
+        full_fetch = request.full_fetch,
         "API request: fetch anime"
     );
 
@@ -137,8 +148,30 @@ pub async fn fetch_anime(
         }
     }
 
+    // Add picture module if available and requested
+    if request.with_pictures || request.full_fetch {
+        if let Some(picture_module) = &state.picture_module {
+            mal_module = mal_module.with_picture_module(picture_module.clone());
+        } else {
+            info!("Picture module not available, fetching without pictures");
+        }
+    }
+
     // Queue the task
-    if request.with_pictures {
+    if request.full_fetch {
+        mal_module
+            .queue_fetch_anime_full(request.anime_id)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue full fetch anime task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue task: {}", e),
+                    })
+                )
+            })?;
+    } else if request.with_pictures {
         mal_module
             .queue_fetch_anime_with_pictures(request.anime_id, request.with_jikan)
             .await
@@ -300,6 +333,8 @@ pub async fn batch_fetch(
     info!(
         count = request.anime_ids.len(),
         with_jikan = request.with_jikan,
+        with_pictures = request.with_pictures,
+        full_fetch = request.full_fetch,
         "API request: batch fetch anime"
     );
 
@@ -331,7 +366,7 @@ pub async fn batch_fetch(
     })?;
 
     mal_module
-        .queue_batch_fetch(request.anime_ids.clone(), request.with_jikan)
+        .queue_batch_fetch(request.anime_ids.clone(), request.with_jikan, request.with_pictures, request.full_fetch)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to queue batch fetch task");
@@ -536,6 +571,7 @@ pub async fn fetch_from_anilist(
     info!(
         mal_id = request.anime_id,
         with_pictures = request.with_pictures,
+        full_fetch = request.full_fetch,
         "API request: fetch anime from AniList"
     );
 
@@ -565,13 +601,26 @@ pub async fn fetch_from_anilist(
     })?;
     
     // Add picture module if available and requested
-    if request.with_pictures {
+    if request.with_pictures || request.full_fetch {
         if let Some(picture_module) = &state.picture_module {
             anilist_module = anilist_module.with_picture_module(picture_module.clone());
         }
     }
 
-    if request.with_pictures {
+    if request.full_fetch {
+        anilist_module
+            .queue_fetch_by_mal_id_full(request.anime_id)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to queue AniList full fetch task");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: format!("Failed to queue task: {}", e),
+                    })
+                )
+            })?;
+    } else if request.with_pictures {
         anilist_module
             .queue_fetch_by_mal_id_with_pictures(request.anime_id)
             .await

@@ -20,6 +20,7 @@ pub struct FetchAnimePayload {
     pub anime_id: u32,
     pub with_jikan: bool,
     pub with_pictures: bool,
+    pub full_fetch: bool,
 }
 
 /// Task to fetch anime data from MyAnimeList API
@@ -34,6 +35,8 @@ pub struct FetchAnimeTask {
     with_jikan: bool,
     /// Whether to queue picture downloads after fetching
     with_pictures: bool,
+    /// Whether to fetch complete data (extended + pictures)
+    full_fetch: bool,
     /// Optional picture module reference
     picture_module: Option<Arc<crate::picture::PictureFetcherModule>>,
 }
@@ -55,6 +58,7 @@ impl FetchAnimeTask {
             created_at: chrono::Utc::now(),
             with_jikan: false,
             with_pictures: false,
+            full_fetch: false,
             picture_module: None,
         }
     }
@@ -68,6 +72,15 @@ impl FetchAnimeTask {
     /// Create a fetch task that also downloads pictures
     pub fn with_pictures(mut self, picture_module: Arc<crate::picture::PictureFetcherModule>) -> Self {
         self.with_pictures = true;
+        self.picture_module = Some(picture_module);
+        self
+    }
+
+    /// Create a full fetch task (Jikan + extended data + pictures)
+    pub fn full_fetch(mut self, picture_module: Arc<crate::picture::PictureFetcherModule>) -> Self {
+        self.with_jikan = true;
+        self.with_pictures = true;
+        self.full_fetch = true;
         self.picture_module = Some(picture_module);
         self
     }
@@ -92,6 +105,7 @@ impl Task for FetchAnimeTask {
             anime_id:self.anime_id,
             with_jikan: self.with_jikan,
             with_pictures: self.with_pictures,
+            full_fetch: self.full_fetch,
         };
 
         TaskData {
@@ -110,6 +124,7 @@ impl Task for FetchAnimeTask {
             anime_id = self.anime_id,
             fetch_jikan = self.with_jikan,
             fetch_pictures = self.with_pictures,
+            full_fetch = self.full_fetch,
             "Fetching anime from MyAnimeList API"
         );
 
@@ -172,7 +187,21 @@ impl Task for FetchAnimeTask {
             "Anime stored successfully"
         );
 
-        // Step 4: Optionally queue picture downloads
+        // Step 4: Optionally fetch extended data if full_fetch is enabled
+        if self.full_fetch {
+            if let Some(picture_module) = &self.picture_module {
+                info!(
+                    task = %self.name(),
+                    anime_id = self.anime_id,
+                    "Full fetch enabled - queueing extended data tasks"
+                );
+                
+                // Queue all extended data tasks
+                self.queue_extended_data(picture_module.queue(), self.anime_id).await?;
+            }
+        }
+
+        // Step 5: Optionally queue picture downloads
         if self.with_pictures {
             if let Some(picture_module) = &self.picture_module {
                 info!(
@@ -224,5 +253,54 @@ impl FetchAnimeTask {
             .await?;
 
         Ok(response)
+    }
+
+    /// Queue all extended data tasks
+    async fn queue_extended_data(
+        &self,
+        queue: &crate::global::queue::TaskQueue,
+        anime_id: u32,
+    ) -> Result<(), AppError> {
+        use super::fetch_extended::*;
+        
+        // Queue characters
+        let task = FetchCharactersTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        // Queue staff
+        let task = FetchStaffTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        // Queue episodes
+        let task = FetchEpisodesTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        // Queue videos
+        let task = FetchVideosTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        // Queue statistics
+        let task = FetchStatisticsTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        // Queue more info
+        let task = FetchMoreInfoTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        // Queue recommendations
+        let task = FetchRecommendationsTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        // Queue pictures metadata
+        let task = FetchPicturesTask::new(anime_id, self.jikan_client.clone());
+        queue.enqueue(Box::new(task)).await?;
+        
+        info!(
+            task = %self.name(),
+            anime_id = anime_id,
+            "All extended data tasks queued"
+        );
+        
+        Ok(())
     }
 }

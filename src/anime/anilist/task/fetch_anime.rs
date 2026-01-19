@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{info, debug, warn};
 
 use crate::anime::anilist::database::upsert_anime;
 use crate::global::queue::{TaskData, TaskPriority, TaskStatus};
@@ -21,6 +21,7 @@ pub struct FetchAnimePayload {
     pub mal_id: Option<u32>,
     pub anilist_id: Option<u32>,
     pub with_pictures: bool,
+    pub full_fetch: bool,
 }
 
 /// Task to fetch anime data from AniList API
@@ -32,6 +33,8 @@ pub struct FetchAnimeTask {
     created_at: chrono::DateTime<chrono::Utc>,
     /// Whether to queue picture downloads after fetching
     with_pictures: bool,
+    /// Whether to fetch complete data (includes pictures)
+    full_fetch: bool,
     /// Optional picture module reference
     picture_module: Option<Arc<crate::picture::PictureFetcherModule>>,
 }
@@ -50,6 +53,7 @@ impl FetchAnimeTask {
             client,
             created_at: chrono::Utc::now(),
             with_pictures: false,
+            full_fetch: false,
             picture_module: None,
         }
     }
@@ -67,13 +71,22 @@ impl FetchAnimeTask {
             client,
             created_at: chrono::Utc::now(),
             with_pictures: false,
+            full_fetch: false,
             picture_module: None,
         }
     }
-
+    
     /// Enable picture downloads
     pub fn with_pictures(mut self, picture_module: Arc<crate::picture::PictureFetcherModule>) -> Self {
         self.with_pictures = true;
+        self.picture_module = Some(picture_module);
+        self
+    }
+    
+    /// Enable full fetch (includes pictures)
+    pub fn full_fetch(mut self, picture_module: Arc<crate::picture::PictureFetcherModule>) -> Self {
+        self.with_pictures = true;
+        self.full_fetch = true;
         self.picture_module = Some(picture_module);
         self
     }
@@ -98,6 +111,7 @@ impl Task for FetchAnimeTask {
             mal_id: self.mal_id,
             anilist_id: self.anilist_id,
             with_pictures: self.with_pictures,
+            full_fetch: self.full_fetch,
         };
 
         TaskData {
@@ -116,6 +130,7 @@ impl Task for FetchAnimeTask {
             mal_id = ?self.mal_id,
             anilist_id = ?self.anilist_id,
             with_pictures = self.with_pictures,
+            full_fetch = self.full_fetch,
             "Fetching anime from AniList API"
         );
 
@@ -141,14 +156,12 @@ impl Task for FetchAnimeTask {
 
         debug!(task = %self.name(), "Sending GraphQL request to AniList");
         
-        // AniList GraphQL endpoint
         let url = "https://graphql.anilist.co";
         
         let config = RequestConfig::new()
             .with_header("Content-Type", "application/json")
             .with_header("Accept", "application/json");
 
-        // Make the request using POST with JSON body
         let response = self.client.client
             .post(url)
             .json(&graphql_request)
@@ -161,7 +174,6 @@ impl Task for FetchAnimeTask {
             .await
             .map_err(|e| AppError::Module(format!("Failed to parse AniList response: {}", e)))?;
 
-        // Check for GraphQL errors
         if !graphql_response.errors.is_empty() {
             let error_messages: Vec<String> = graphql_response.errors
                 .iter()
@@ -201,7 +213,7 @@ impl Task for FetchAnimeTask {
             title = %anime_data.titles.first().map(|t| t.title.as_str()).unwrap_or("Unknown"),
             "Anime stored successfully in anime_anilist collection"
         );
-
+        
         // Optionally queue picture downloads
         if self.with_pictures {
             if let Some(picture_module) = &self.picture_module {
@@ -232,7 +244,7 @@ impl Task for FetchAnimeTask {
                 );
             }
         }
-        
+
         Ok(())
     }
 }

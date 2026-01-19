@@ -82,6 +82,46 @@ impl FetchPictureTask {
             .unwrap_or_else(|| format!("image_{}.jpg", uuid::Uuid::new_v4()))
     }
 
+    /// Build directory path based on entity and tags
+    fn build_directory_path(&self, base_path: &PathBuf) -> PathBuf {
+        let mut path = base_path.clone();
+        
+        // Add entity type folder (anime, manga, etc.)
+        if let Some(entity_type) = &self.entity_type {
+            path.push(entity_type);
+            
+            // Add entity ID folder
+            if let Some(entity_id) = &self.entity_id {
+                path.push(entity_id);
+                
+                // Add category folder based on tags
+                if self.tags.contains(&"character".to_string()) {
+                    path.push("characters");
+                } else if self.tags.contains(&"staff".to_string()) {
+                    path.push("staff");
+                } else if self.tags.contains(&"voice_actor".to_string()) {
+                    path.push("voice_actors");
+                } else if self.tags.contains(&"video_promo".to_string()) {
+                    path.push("videos/promo");
+                } else if self.tags.contains(&"video_episode".to_string()) {
+                    path.push("videos/episodes");
+                } else if self.tags.contains(&"video_music".to_string()) {
+                    path.push("videos/music");
+                } else if self.tags.contains(&"recommendation".to_string()) {
+                    path.push("recommendations");
+                } else if self.tags.contains(&"picture".to_string()) {
+                    path.push("pictures");
+                } else if self.tags.contains(&"banner".to_string()) {
+                    path.push("banners");
+                } else if self.tags.contains(&"cover".to_string()) || self.tags.contains(&"main".to_string()) {
+                    path.push("covers");
+                }
+            }
+        }
+        
+        path
+    }
+
     /// Sanitize filename to prevent path traversal
     fn sanitize_filename(filename: &str) -> String {
         filename
@@ -160,9 +200,12 @@ impl Task for FetchPictureTask {
             "Fetching picture"
         );
         
+        // Build directory path based on entity and category
+        let directory_path = self.build_directory_path(&self.storage_path);
+
         // Prepare filename and path
         let filename = Self::sanitize_filename(&self.get_filename());
-        let file_path = self.storage_path.join(&filename);
+        let file_path = directory_path.join(&filename);
         let file_path_str = file_path.to_string_lossy().to_string();
         
         // Create initial metadata
